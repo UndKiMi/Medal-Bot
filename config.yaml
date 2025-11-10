@@ -1,0 +1,48 @@
+# Configuration du Bot McDonald's
+
+# URL du questionnaire
+survey_url: "https://survey2.medallia.eu/?hellomcdo"
+
+# Numéro du restaurant
+restaurant_number: "1435"
+
+# Configuration Chrome
+chrome:
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  window_size: "1920,1080"
+  languages: ["fr-FR", "fr"]
+  vendor: "Google Inc."
+  platform: "Win32"
+  webgl_vendor: "Intel Inc."
+  renderer: "Intel Iris OpenGL Engine"
+
+# Timing (en secondes)
+timing:
+  page_load: [2, 4]  # Min, Max
+  between_actions: [0.3, 0.7]
+  between_steps: [1, 2]
+  between_questionnaires: [45, 90]
+  retry_delay: [15, 30]
+
+# Chemins des fichiers d'avis
+avis_files:
+  drive: "AVIS/drive.txt"
+  counter: "AVIS/comptoir.txt"
+  kiosk: "AVIS/borne.txt"
+  delivery: "AVIS/livraison.txt"
+
+# Options de sélection
+selection:
+  exclude_under_15: true  # Ne jamais sélectionner "moins de 15 ans"
+  max_location_options: 6  # Nombre max d'options de lieu de commande
+  always_best_rating: true  # Toujours sélectionner le meilleur score
+  order_accurate: true  # Toujours dire que la commande était exacte
+  no_problems: true  # Toujours dire qu'il n'y a pas eu de problème
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/bot.log"
+  max_bytes: 10485760  # 10 MB
+  backup_count: 5
+  console_output: true

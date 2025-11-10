@@ -1,0 +1,16 @@
+# Dependencies pour Medal Bot v3.0
+
+# Selenium et drivers
+selenium>=4.15.0
+undetected-chromedriver>=3.5.4
+selenium-stealth>=1.0.6
+
+# Gestion système
+psutil>=5.9.6
+
+# Configuration
+PyYAML>=6.0.1
+python-dotenv>=1.0.0
+
+# Utilitaires
+python-dateutil>=2.8.2

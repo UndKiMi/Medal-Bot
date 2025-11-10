@@ -1,0 +1,804 @@
+import logging
+import os
+import random
+import time
+import traceback
+from datetime import datetime, timedelta
+from bot.config_loader import config
+from bot.utils.helpers import wait_random, human_typing, random_scroll
+from bot.scheduler import scheduler
+from selenium.webdriver import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.remote.webelement import WebElement
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+import undetected_chromedriver as uc
+from selenium_stealth import stealth
+
+from bot.config import (
+    XPATHS, TIMING, CHROME_OPTIONS, 
+    AVIS_MAPPING, SERVICE_TYPE_MAPPING,
+    RESTAURANT_NUMBER, SURVEY_URL, BASE_DIR
+)
+
+# Logger (configuration centralisée dans main.py)
+logger = logging.getLogger(__name__)
+
+# Dictionnaire pour stocker les données de session
+session_data = {
+    'start_time': None,
+    'current_category': None,
+    'current_avis_file': None,
+    'requires_extra_steps': False
+}
+
+def setup_driver() -> Optional[uc.Chrome]:
+    """Configure et retourne une instance du navigateur Chrome avec les options nécessaires."""
+    try:
+        options = uc.ChromeOptions()
+        
+        # Configuration de base
+        options.add_argument('--start-maximized')
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_argument('--disable-infobars')
+        options.add_argument('--disable-notifications')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-popup-blocking')
+        
+        # NE PAS configurer l'agent utilisateur via add_argument pour éviter la page intermédiaire
+        # L'agent sera configuré via selenium-stealth à la place
+        
+        # Initialiser le navigateur sans version_main pour éviter la page de test
+        driver = uc.Chrome(
+            options=options,
+            use_subprocess=True,
+            version_main=None  # Évite la page de test du user-agent
+        )
+        
+        # Appliquer les paramètres de furtivité (inclut le user-agent)
+        stealth(
+            driver,
+            languages=CHROME_OPTIONS['languages'],
+            vendor=CHROME_OPTIONS['vendor'],
+            platform=CHROME_OPTIONS['platform'],
+            webgl_vendor=CHROME_OPTIONS['webgl_vendor'],
+            renderer=CHROME_OPTIONS['renderer'],
+            fix_hairline=True,
+            user_agent=CHROME_OPTIONS["user_agent"]  # Configurer le user-agent ici
+        )
+        
+        # Modifier des propriétés du navigateur pour éviter la détection
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        # Définir la taille de la fenêtre
+        width, height = map(int, CHROME_OPTIONS['window_size'].split(','))
+        driver.set_window_size(width, height)
+        
+        # Déplacer la souris de manière aléatoire
+        action = ActionChains(driver)
+        action.move_by_offset(random.randint(0, 100), random.randint(0, 100)).perform()
+        
+        return driver
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de l'initialisation du navigateur: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return None
+
+def cleanup_driver(driver):
+    """Ferme le navigateur de manière propre."""
+    if driver:
+        try:
+            driver.quit()
+            logger.info("✅ Navigateur fermé avec succès")
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la fermeture du navigateur: {e}")
+
+def wait_random(min_seconds: float, max_seconds: float) -> None:
+    """Attend un nombre aléatoire de secondes entre min_seconds et max_seconds."""
+    delay = random.uniform(min_seconds, max_seconds)
+    time.sleep(delay)
+
+def human_typing(element: WebElement, text: str) -> None:
+    """Simule une frappe humaine dans un champ de texte."""
+    for char in text:
+        element.send_keys(char)
+        time.sleep(random.uniform(0.05, 0.15))
+
+def pick_avis(category: str = None) -> str:
+    """Sélectionne un avis aléatoire en fonction de la catégorie."""
+    try:
+        if not category or category not in AVIS_MAPPING:
+            avis_file = AVIS_MAPPING.get('drive')
+        else:
+            avis_file = AVIS_MAPPING.get(category)
+        
+        session_data['current_avis_file'] = avis_file
+        
+        if not os.path.exists(avis_file):
+            logger.error(f"❌ Fichier d'avis introuvable: {avis_file}")
+            return "Excellent service, très satisfait de ma visite !"
+        
+        with open(avis_file, 'r', encoding='utf-8') as f:
+            avis_list = [line.strip() for line in f if line.strip()]
+        
+        if not avis_list:
+            logger.error(f"❌ Aucun avis trouvé dans le fichier: {avis_file}")
+            return "Excellent service, très satisfait de ma visite !"
+        
+        selected_avis = random.choice(avis_list)
+        logger.info(f"📝 Avis sélectionné: {selected_avis[:50]}...")
+        
+        return selected_avis
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de la sélection de l'avis: {e}")
+        return "Excellent service, très satisfait de ma visite !"
+
+# ============================================================================
+# ÉTAPES DU QUESTIONNAIRE (ordre exact selon le code fourni)
+# ============================================================================
+
+def step_1_start_survey(driver) -> bool:
+    """Étape 1: Page d'accueil - Cliquer sur 'Commencer l'enquête'"""
+    logger.info("🏁 Étape 1: Page d'accueil - Commencer l'enquête")
+    try:
+        wait_random(2, 4)
+        
+        # Chercher le bouton "Commencer l'enquête" ou "Commencer"
+        start_button = None
+        selectors = [
+            "//button[contains(text(), 'Commencer')]",
+            "//button[contains(., 'Commencer')]",
+            "//button[contains(text(), 'Start')]",
+            "//input[@type='submit']"
+        ]
+        
+        for selector in selectors:
+            try:
+                start_button = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, selector))
+                )
+                if start_button:
+                    break
+            except:
+                continue
+        
+        if not start_button:
+            logger.error("❌ Bouton 'Commencer' non trouvé")
+            return False
+        
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", start_button)
+        wait_random(0.5, 1.5)
+        driver.execute_script("arguments[0].click();", start_button)
+        
+        logger.info("✅ Bouton 'Commencer l'enquête' cliqué")
+        wait_random(2, 3)
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 1: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+def step_2_age_selection(driver) -> bool:
+    """Étape 2: Sélection tranche d'âge (choix aléatoire, excluant 'moins de 15 ans')"""
+    logger.info("👤 Étape 2: Sélection tranche d'âge")
+    try:
+        wait_random(1, 2)
+        
+        # Trouver tous les boutons radio pour l'âge
+        radios_age = WebDriverWait(driver, 10).until(
+            EC.presence_of_all_elements_located((By.XPATH, "//input[@type='radio']"))
+        )
+        
+        if radios_age and len(radios_age) > 1:
+            # Exclure le premier bouton (moins de 15 ans) et choisir parmi les autres
+            eligible_radios = radios_age[1:]  # Exclut le premier élément
+            selected_radio = random.choice(eligible_radios)
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
+            wait_random(0.3, 0.7)
+            driver.execute_script("arguments[0].click();", selected_radio)
+            logger.info("✅ Tranche d'âge sélectionnée (excluant 'moins de 15 ans')")
+        
+        # Cliquer sur Suivant
+        wait_random(1, 2)
+        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
+        driver.execute_script("arguments[0].click();", next_button)
+        
+        wait_random(2, 3)
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 2: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+def step_3_ticket_info(driver) -> bool:
+    """Étape 3: Informations du ticket (date/heure/minute/numéro resto)"""
+    logger.info("🎫 Étape 3: Informations du ticket")
+    try:
+        wait_random(1, 2)
+        
+        # Générer une heure de visite aléatoire réaliste via le scheduler
+        visit_time = scheduler.get_random_visit_time()
+        
+        if visit_time is None:
+            logger.error("❌ Impossible de générer une heure de visite valide")
+            return False
+        
+        date_jour, heure, minute = visit_time
+        
+        # 1. Saisir la date
+        try:
+            date_field = driver.find_element(By.XPATH, "//input[@placeholder='JJ/MM/AAAA']")
+            date_field.clear()
+            wait_random(0.2, 0.5)
+            human_typing(date_field, date_jour)
+            logger.info(f"✅ Date saisie: {date_jour}")
+        except:
+            logger.warning("⚠️ Champ date non trouvé")
+        
+        wait_random(0.5, 1)
+        
+        # 2. Saisir heure et minute
+        try:
+            heure_fields = driver.find_elements(By.XPATH, "//input[@maxlength='2' and @type='text']")
+            if len(heure_fields) >= 2:
+                heure_fields[0].clear()
+                human_typing(heure_fields[0], heure)
+                wait_random(0.3, 0.6)
+                heure_fields[1].clear()
+                human_typing(heure_fields[1], minute)
+                logger.info(f"✅ Heure saisie: {heure}:{minute}")
+        except:
+            logger.warning("⚠️ Champs heure/minute non trouvés")
+        
+        wait_random(0.5, 1)
+        
+        # 3. Saisir numéro restaurant (4 chiffres)
+        try:
+            restaurant_field = driver.find_element(By.XPATH, "//input[@maxlength='4' and @type='text']")
+            restaurant_field.clear()
+            wait_random(0.2, 0.5)
+            human_typing(restaurant_field, RESTAURANT_NUMBER)
+            logger.info(f"✅ Numéro restaurant saisi: {RESTAURANT_NUMBER}")
+        except:
+            logger.warning("⚠️ Champ numéro restaurant non trouvé")
+        
+        # Cliquer sur Suivant
+        wait_random(1, 2)
+        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
+        driver.execute_script("arguments[0].click();", next_button)
+        
+        wait_random(2, 3)
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 3: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+def step_4_order_location(driver) -> bool:
+    """Étape 4: Lieu de commande (6 premières options seulement)"""
+    logger.info("📍 Étape 4: Lieu de commande")
+    try:
+        wait_random(1, 2)
+        
+        # Trouver tous les boutons radio
+        lieu_radios = WebDriverWait(driver, 10).until(
+            EC.presence_of_all_elements_located((By.XPATH, "//input[@type='radio']"))
+        )
+        
+        # Stocker l'index sélectionné pour savoir si on a des étapes supplémentaires
+        selected_index = None
+        
+        if lieu_radios and len(lieu_radios) >= 6:
+            # Choisir parmi les 6 premières options uniquement
+            selected_index = random.randint(0, 5)
+            selected_radio = lieu_radios[selected_index]
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
+            wait_random(0.3, 0.7)
+            driver.execute_script("arguments[0].click();", selected_radio)
+            
+            # Déterminer le type d'étapes supplémentaires selon l'option choisie
+            # Index 0 = Borne → étapes 4b (consommation) + 4c (récupération)
+            # Index 1 = Comptoir → étapes 4b (consommation) + 4c (récupération)
+            # Index 2 = Click & Collect app mobile → étape 4d (lieu récupération)
+            # Index 3 = Click & Collect site web → étape 4d (lieu récupération)
+            # Index 4-5 = Autres → pas d'étapes supplémentaires
+            
+            if selected_index in [0, 1]:
+                # Borne ou Comptoir
+                session_data['requires_extra_steps'] = 'borne_comptoir'
+                logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
+                logger.info("ℹ️  Borne/Comptoir → Étapes supplémentaires: consommation + récupération")
+            elif selected_index in [2, 3]:
+                # Click & Collect
+                session_data['requires_extra_steps'] = 'click_collect'
+                logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
+                logger.info("ℹ️  Click & Collect → Étape supplémentaire: lieu de récupération")
+            else:
+                # Pas d'étapes supplémentaires
+                session_data['requires_extra_steps'] = None
+                logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
+        
+        # Cliquer sur Suivant
+        wait_random(1, 2)
+        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
+        driver.execute_script("arguments[0].click();", next_button)
+        
+        wait_random(2, 3)
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 4: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+def step_4b_consumption_type(driver) -> bool:
+    """Étape 4b (conditionnelle): Sur place ou à emporter"""
+    logger.info("🍽️ Étape 4b: Type de consommation (sur place / à emporter)")
+    try:
+        wait_random(1, 2)
+        
+        # Trouver les boutons radio pour le type de consommation
+        consumption_radios = WebDriverWait(driver, 10).until(
+            EC.presence_of_all_elements_located((By.XPATH, "//input[@type='radio']"))
+        )
+        
+        if consumption_radios and len(consumption_radios) >= 2:
+            # Choisir aléatoirement entre sur place (0) ou à emporter (1)
+            selected_radio = random.choice(consumption_radios[:2])
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
+            wait_random(0.3, 0.7)
+            driver.execute_script("arguments[0].click();", selected_radio)
+            logger.info("✅ Type de consommation sélectionné")
+        
+        # Cliquer sur Suivant
+        wait_random(1, 2)
+        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
+        driver.execute_script("arguments[0].click();", next_button)
+        
+        wait_random(2, 3)
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 4b: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+def step_4c_pickup_location(driver) -> bool:
+    """Étape 4c (conditionnelle Borne/Comptoir): Où avez-vous récupéré votre commande"""
+    logger.info("📦 Étape 4c: Lieu de récupération de la commande (Borne/Comptoir)")
+    try:
+        wait_random(1, 2)
+        
+        # Trouver les boutons radio pour le lieu de récupération
+        pickup_radios = WebDriverWait(driver, 10).until(
+            EC.presence_of_all_elements_located((By.XPATH, "//input[@type='radio']"))
+        )
+        
+        if pickup_radios and len(pickup_radios) >= 2:
+            # Choisir aléatoirement entre "Au comptoir" (0) ou "En service à table" (1)
+            selected_radio = random.choice(pickup_radios[:2])
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
+            wait_random(0.3, 0.7)
+            driver.execute_script("arguments[0].click();", selected_radio)
+            logger.info("✅ Lieu de récupération sélectionné (Au comptoir / En service à table)")
+        
+        # Cliquer sur Suivant
+        wait_random(1, 2)
+        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
+        driver.execute_script("arguments[0].click();", next_button)
+        
+        wait_random(2, 3)
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 4c: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+def step_4d_click_collect_pickup(driver) -> bool:
+    """Étape 4d (conditionnelle Click & Collect): Où avez-vous récupéré votre commande"""
+    logger.info("📦 Étape 4d: Lieu de récupération Click & Collect")
+    try:
+        wait_random(1, 2)
+        
+        # Trouver les boutons radio pour le lieu de récupération Click & Collect
+        pickup_radios = WebDriverWait(driver, 10).until(
+            EC.presence_of_all_elements_located((By.XPATH, "//input[@type='radio']"))
+        )
+        
+        if pickup_radios and len(pickup_radios) >= 4:
+            # Choisir aléatoirement parmi les 4 options:
+            # 0 = Au comptoir
+            # 1 = Au drive
+            # 2 = Au guichet extérieur de vente à emporter
+            # 3 = A l'extérieur du restaurant
+            selected_radio = random.choice(pickup_radios[:4])
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
+            wait_random(0.3, 0.7)
+            driver.execute_script("arguments[0].click();", selected_radio)
+            logger.info("✅ Lieu de récupération Click & Collect sélectionné")
+        
+        # Cliquer sur Suivant
+        wait_random(1, 2)
+        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
+        driver.execute_script("arguments[0].click();", next_button)
+        
+        wait_random(2, 3)
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 4d: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+def step_5_satisfaction_comment(driver) -> bool:
+    """Étape 5: Satisfaction générale (premier smiley vert foncé) + commentaire"""
+    logger.info("😊 Étape 5: Satisfaction générale + commentaire")
+    try:
+        wait_random(1, 2)
+        
+        # 1. Cliquer sur le premier smiley (vert foncé = meilleure satisfaction)
+        try:
+            # Trouver tous les boutons radio de la page
+            all_radios = driver.find_elements(By.XPATH, "//input[@type='radio']")
+            
+            if all_radios and len(all_radios) > 0:
+                logger.info(f"📊 {len(all_radios)} smileys trouvés sur la page")
+                
+                # Le premier radio de cette page est le smiley vert foncé
+                first_smiley = all_radios[0]
+                
+                # Faire défiler et attendre
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_smiley)
+                wait_random(0.5, 1)
+                
+                # Forcer le clic avec plusieurs méthodes
+                try:
+                    # Méthode 1 : Clic JavaScript
+                    driver.execute_script("arguments[0].click();", first_smiley)
+                    wait_random(0.3, 0.5)
+                except:
+                    pass
+                
+                # Méthode 2 : Forcer checked=true
+                driver.execute_script("arguments[0].checked = true;", first_smiley)
+                wait_random(0.2, 0.4)
+                
+                # Méthode 3 : Trigger change event
+                driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", first_smiley)
+                
+                # Vérifier qu'il est bien coché
+                is_checked = driver.execute_script("return arguments[0].checked;", first_smiley)
+                if is_checked:
+                    logger.info("✅ Premier smiley vert foncé confirmé coché")
+                else:
+                    logger.warning("⚠️ Le smiley ne semble pas coché, dernière tentative...")
+                    # Clic sur le label parent
+                    try:
+                        parent_label = driver.execute_script("return arguments[0].parentElement;", first_smiley)
+                        driver.execute_script("arguments[0].click();", parent_label)
+                    except:
+                        pass
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur lors de la sélection du smiley: {e}")
+        
+        wait_random(1, 2)
+        
+        # 2. Saisir le commentaire
+        try:
+            # Chercher le textarea avec plusieurs sélecteurs
+            textarea = None
+            selectors = [
+                "//textarea",
+                "//textarea[@placeholder]",
+                "//textarea[contains(@class, 'comment')]",
+                "//textarea[contains(@id, 'comment')]"
+            ]
+            
+            for selector in selectors:
+                try:
+                    textarea = driver.find_element(By.XPATH, selector)
+                    if textarea:
+                        logger.info(f"✅ Textarea trouvé avec: {selector}")
+                        break
+                except:
+                    continue
+            
+            if textarea:
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", textarea)
+                wait_random(0.5, 1)
+                
+                # Récupérer un avis depuis les fichiers
+                commentaire = pick_avis(session_data.get('current_category'))
+                
+                # Cliquer et saisir
+                textarea.click()
+                wait_random(0.3, 0.7)
+                textarea.clear()
+                human_typing(textarea, commentaire)
+                logger.info(f"✅ Commentaire saisi: {commentaire[:50]}...")
+            else:
+                logger.warning("⚠️ Textarea non trouvé avec tous les sélecteurs")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur lors de la saisie du commentaire: {e}")
+        
+        # Cliquer sur Suivant
+        wait_random(1, 2)
+        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
+        driver.execute_script("arguments[0].click();", next_button)
+        
+        wait_random(2, 3)
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 5: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+def step_6_dimension_ratings(driver) -> bool:
+    """Étape 6: Notes sur chaque dimension (premier émoji vert foncé de chaque ligne)"""
+    logger.info("⭐ Étape 6: Notes sur chaque dimension")
+    try:
+        wait_random(1, 2)
+        
+        # Trouver tous les boutons radio (il y a 4 lignes avec 6 options chacune: 5 émojis + "Non concerné")
+        radios_dim = driver.find_elements(By.XPATH, "//input[@type='radio']")
+        
+        if radios_dim:
+            # Calculer le nombre d'options par ligne (normalement 6: 5 émojis + 1 "Non concerné")
+            # Il y a 4 lignes de questions
+            options_per_line = 6
+            nb_lines = 4
+            
+            logger.info(f"📊 Total de boutons radio trouvés: {len(radios_dim)}")
+            logger.info(f"📊 Nombre de lignes à traiter: {nb_lines}")
+            
+            # Pour chaque ligne, cliquer sur le premier émoji (index 0, 6, 12, 18)
+            for line_num in range(nb_lines):
+                index = line_num * options_per_line
+                
+                if index < len(radios_dim):
+                    # Faire défiler jusqu'à l'élément
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", radios_dim[index])
+                    wait_random(0.3, 0.7)
+                    
+                    # Cliquer sur le premier émoji (vert foncé)
+                    driver.execute_script("arguments[0].click();", radios_dim[index])
+                    logger.info(f"✅ Ligne {line_num + 1}: Premier émoji vert foncé sélectionné (index {index})")
+                    wait_random(0.2, 0.5)
+            
+            logger.info("✅ Toutes les dimensions notées avec le meilleur score")
+        else:
+            logger.warning("⚠️ Aucun bouton radio trouvé")
+        
+        # Attendre que le bouton Suivant soit activé
+        wait_random(1, 2)
+        
+        # Chercher le bouton Suivant avec plusieurs sélecteurs possibles
+        next_button = None
+        selectors = [
+            "//button[contains(., 'Suivant')]",
+            "//button[contains(text(), 'Suivant')]",
+            "//button[@type='submit']",
+            "//input[@type='submit' and contains(@value, 'Suivant')]",
+            "//button[contains(@class, 'next')]",
+            "//button[contains(@class, 'submit')]"
+        ]
+        
+        for selector in selectors:
+            try:
+                next_button = WebDriverWait(driver, 3).until(
+                    EC.element_to_be_clickable((By.XPATH, selector))
+                )
+                if next_button:
+                    logger.info(f"✅ Bouton Suivant trouvé avec le sélecteur: {selector}")
+                    break
+            except:
+                continue
+        
+        if not next_button:
+            logger.error("❌ Bouton Suivant introuvable avec tous les sélecteurs")
+            return False
+        
+        # Faire défiler et cliquer
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
+        wait_random(0.5, 1)
+        driver.execute_script("arguments[0].click();", next_button)
+        logger.info("✅ Bouton Suivant cliqué")
+        
+        wait_random(2, 3)
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 6: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+def step_7_order_accuracy(driver) -> bool:
+    """Étape 7: Commande exacte (Oui = premier bouton)"""
+    logger.info("✅ Étape 7: Commande exacte")
+    try:
+        wait_random(1, 2)
+        
+        # Cliquer sur le premier bouton (Oui)
+        radios_exact = driver.find_elements(By.XPATH, "//input[@type='radio']")
+        if radios_exact:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", radios_exact[0])
+            wait_random(0.3, 0.7)
+            driver.execute_script("arguments[0].click();", radios_exact[0])
+            logger.info("✅ 'Oui' sélectionné (commande exacte)")
+        
+        # Cliquer sur Suivant
+        wait_random(1, 2)
+        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
+        driver.execute_script("arguments[0].click();", next_button)
+        
+        wait_random(2, 3)
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 7: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+def step_8_problem_encountered(driver) -> bool:
+    """Étape 8: Problème rencontré (Non = deuxième bouton)"""
+    logger.info("❌ Étape 8: Problème rencontré")
+    try:
+        wait_random(1, 2)
+        
+        # Cliquer sur le deuxième bouton (Non)
+        radios_prob = driver.find_elements(By.XPATH, "//input[@type='radio']")
+        if radios_prob and len(radios_prob) >= 2:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", radios_prob[1])
+            wait_random(0.3, 0.7)
+            driver.execute_script("arguments[0].click();", radios_prob[1])
+            logger.info("✅ 'Non' sélectionné (aucun problème)")
+        
+        # Cliquer sur Suivant
+        wait_random(1, 2)
+        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
+        driver.execute_script("arguments[0].click();", next_button)
+        
+        wait_random(3, 5)
+        logger.info("🎉 Questionnaire terminé !")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur étape 8: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
+
+# ============================================================================
+# FONCTION PRINCIPALE
+# ============================================================================
+
+def run_survey_bot(driver: uc.Chrome) -> bool:
+    """Exécute le bot de questionnaire selon le parcours exact."""
+    try:
+        session_data['start_time'] = datetime.now()
+        session_data['requires_extra_steps'] = False
+        logger.info("🚀 Démarrage du bot de questionnaire")
+        
+        # Liste des étapes de base dans l'ordre
+        base_steps = [
+            (step_1_start_survey, "Page d'accueil - Commencer l'enquête"),
+            (step_2_age_selection, "Sélection tranche d'âge"),
+            (step_3_ticket_info, "Informations du ticket"),
+            (step_4_order_location, "Lieu de commande"),
+        ]
+        
+        # Exécuter les étapes de base
+        step_counter = 1
+        for step_func, step_name in base_steps:
+            try:
+                logger.info(f"📍 Étape {step_counter}: {step_name}")
+                result = step_func(driver)
+                
+                if not result:
+                    logger.error(f"❌ Échec de l'étape {step_counter}: {step_name}")
+                    return False
+                else:
+                    logger.info(f"✅ Étape {step_counter} réussie: {step_name}")
+                    step_counter += 1
+                    
+            except Exception as e:
+                logger.error(f"❌ Erreur à l'étape {step_counter} ({step_name}): {e}")
+                logger.debug(f"Détails: {traceback.format_exc()}")
+                return False
+        
+        # Vérifier si on a besoin des étapes conditionnelles
+        extra_steps_type = session_data.get('requires_extra_steps')
+        
+        if extra_steps_type == 'borne_comptoir':
+            logger.info("🔀 Étapes supplémentaires: Borne/Comptoir")
+            
+            # Étape 4b: Type de consommation
+            try:
+                logger.info(f"📍 Étape {step_counter}: Type de consommation")
+                result = step_4b_consumption_type(driver)
+                if not result:
+                    logger.error(f"❌ Échec de l'étape {step_counter}")
+                    return False
+                logger.info(f"✅ Étape {step_counter} réussie")
+                step_counter += 1
+            except Exception as e:
+                logger.error(f"❌ Erreur à l'étape {step_counter}: {e}")
+                logger.debug(f"Détails: {traceback.format_exc()}")
+                return False
+            
+            # Étape 4c: Lieu de récupération (Borne/Comptoir)
+            try:
+                logger.info(f"📍 Étape {step_counter}: Lieu de récupération")
+                result = step_4c_pickup_location(driver)
+                if not result:
+                    logger.error(f"❌ Échec de l'étape {step_counter}")
+                    return False
+                logger.info(f"✅ Étape {step_counter} réussie")
+                step_counter += 1
+            except Exception as e:
+                logger.error(f"❌ Erreur à l'étape {step_counter}: {e}")
+                logger.debug(f"Détails: {traceback.format_exc()}")
+                return False
+        
+        elif extra_steps_type == 'click_collect':
+            logger.info("🔀 Étapes supplémentaires: Click & Collect")
+            
+            # Étape 4d: Lieu de récupération Click & Collect
+            try:
+                logger.info(f"📍 Étape {step_counter}: Lieu de récupération Click & Collect")
+                result = step_4d_click_collect_pickup(driver)
+                if not result:
+                    logger.error(f"❌ Échec de l'étape {step_counter}")
+                    return False
+                logger.info(f"✅ Étape {step_counter} réussie")
+                step_counter += 1
+            except Exception as e:
+                logger.error(f"❌ Erreur à l'étape {step_counter}: {e}")
+                logger.debug(f"Détails: {traceback.format_exc()}")
+                return False
+        
+        # Continuer avec les étapes finales
+        final_steps = [
+            (step_5_satisfaction_comment, "Satisfaction générale + commentaire"),
+            (step_6_dimension_ratings, "Notes sur chaque dimension"),
+            (step_7_order_accuracy, "Commande exacte"),
+            (step_8_problem_encountered, "Problème rencontré")
+        ]
+        
+        for step_func, step_name in final_steps:
+            try:
+                logger.info(f"📍 Étape {step_counter}: {step_name}")
+                result = step_func(driver)
+                
+                if not result:
+                    logger.error(f"❌ Échec de l'étape {step_counter}: {step_name}")
+                    return False
+                else:
+                    logger.info(f"✅ Étape {step_counter} réussie: {step_name}")
+                    step_counter += 1
+                    
+            except Exception as e:
+                logger.error(f"❌ Erreur à l'étape {step_counter} ({step_name}): {e}")
+                logger.debug(f"Détails: {traceback.format_exc()}")
+                return False
+        
+        # Calculer la durée totale
+        duration = (datetime.now() - session_data['start_time']).total_seconds()
+        logger.info(f"⏱️  Durée totale du questionnaire: {duration:.2f} secondes")
+        logger.info("🎉 Questionnaire complété avec succès!")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur critique lors de l'exécution du bot: {e}")
+        logger.debug(f"Détails: {traceback.format_exc()}")
+        return False
