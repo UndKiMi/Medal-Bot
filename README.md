@@ -356,6 +356,6 @@ Merci d'utiliser Survey Bot ! Si ce projet vous a aidé, n'hésitez pas à :
 
 **Made with ❤️ by KiMi**
 
-🤖 **Happy automating!**
+🤖 **Combien de temps le niveau ?!**
 
 </div>
