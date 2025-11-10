@@ -59,3 +59,5 @@ undetected_chromedriver/
 # Temporary files
 *.tmp
 *.temp
+build_exe.bat
+build_exe.py
