@@ -442,7 +442,8 @@ class MedalBotGUI:
             bg='#1e1e1e',  # Fond sombre (VS Code style)
             fg='#d4d4d4',  # Texte gris clair par défaut
             insertbackground='white',  # Curseur blanc
-            selectbackground='#264f78'  # Sélection bleue
+            selectbackground='#264f78',  # Sélection bleue
+            state='disabled'  # Lecture seule
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
         
@@ -522,8 +523,10 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
         try:
             while True:
                 message, tag = self.log_queue.get_nowait()
+                self.log_text.config(state='normal')
                 self.log_text.insert(tk.END, message, tag)
                 self.log_text.see(tk.END)
+                self.log_text.config(state='disabled')
         except queue.Empty:
             pass
         
@@ -632,6 +635,11 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
             
             while self.bot_running:
                 try:
+                    # Déterminer la catégorie (aléatoire) AVANT de vérifier si on peut exécuter
+                    import random
+                    categories = ['Borne', 'Comptoir', 'Click & Collect App', 'Click & Collect Site', 'Drive', 'Livraison']
+                    category = random.choice(categories)
+                    
                     # Vérifier si on peut exécuter un questionnaire
                     can_run, reason = scheduler.can_run_questionnaire()
                     
@@ -641,7 +649,7 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                         if next_run:
                             self.log(f"⏰ Prochain run: {next_run.strftime('%d/%m/%Y à %H:%M')}", 'info')
                             self.stats['next_survey'] = {
-                                'category': 'À déterminer',
+                                'category': category,
                                 'time': next_run.strftime('%d/%m/%Y à %H:%M')
                             }
                             self.save_stats()
@@ -649,11 +657,6 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                         self.log("🛑 Arrêt du bot", 'warning')
                         self.stop_bot()
                         break
-                    
-                    # Déterminer la catégorie (aléatoire)
-                    import random
-                    categories = ['Borne', 'Comptoir', 'Click & Collect App', 'Click & Collect Site', 'Drive', 'Livraison']
-                    category = random.choice(categories)
                     
                     # Préparer le prochain questionnaire
                     next_time = datetime.now().strftime("%H:%M:%S")
@@ -725,7 +728,14 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                         self.log("🎯 Quota journalier atteint!", 'success')
                         next_run = scheduler.calculate_next_run_time()
                         if next_run:
+                            next_category = random.choice(categories)
                             self.log(f"⏰ Prochain run: {next_run.strftime('%d/%m/%Y à %H:%M')}", 'info')
+                            self.stats['next_survey'] = {
+                                'category': next_category,
+                                'time': next_run.strftime('%d/%m/%Y à %H:%M')
+                            }
+                            self.save_stats()
+                            self.root.after(0, self.update_stats_display)
                         self.log("🛑 Arrêt du bot", 'warning')
                         self.stop_bot()
                         break
@@ -737,8 +747,15 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                         wait_seconds = int((next_run - datetime.now()).total_seconds())
                         
                         if wait_seconds > 0:
+                            next_category = random.choice(categories)
                             self.log(f"⏱️ Attente de {wait_seconds} secondes avant le prochain questionnaire...", 'info')
                             self.log(f"⏰ Prochain questionnaire prévu à {next_run.strftime('%H:%M')}", 'info')
+                            self.stats['next_survey'] = {
+                                'category': next_category,
+                                'time': next_run.strftime('%d/%m/%Y à %H:%M')
+                            }
+                            self.save_stats()
+                            self.root.after(0, self.update_stats_display)
                             
                             for i in range(wait_seconds):
                                 if not self.bot_running:
@@ -776,7 +793,9 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
     
     def clear_logs(self):
         """Efface les logs."""
+        self.log_text.config(state='normal')
         self.log_text.delete(1.0, tk.END)
+        self.log_text.config(state='disabled')
         self.log("🗑️ Logs effacés", 'info')
 
 
