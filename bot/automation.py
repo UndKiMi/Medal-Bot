@@ -306,22 +306,23 @@ def step_4_order_location(driver) -> bool:
             # Déterminer le type d'étapes supplémentaires selon l'option choisie
             # Index 0 = Borne → étapes 4b (consommation) + 4c (récupération)
             # Index 1 = Comptoir → étapes 4b (consommation) + 4c (récupération)
-            # Index 2 = Click & Collect app mobile → étape 4d (lieu récupération)
-            # Index 3 = Click & Collect site web → étape 4d (lieu récupération)
-            # Index 4-5 = Autres → pas d'étapes supplémentaires
+            # Index 2 = Drive → pas d'étapes supplémentaires
+            # Index 3 = Guichet extérieur → pas d'étapes supplémentaires
+            # Index 4 = Click & Collect app mobile → étape 4d (lieu récupération)
+            # Index 5 = Click & Collect site web → étape 4d (lieu récupération)
             
             if selected_index in [0, 1]:
                 # Borne ou Comptoir
                 session_data['requires_extra_steps'] = 'borne_comptoir'
                 logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
                 logger.info("ℹ️  Borne/Comptoir → Étapes supplémentaires: consommation + récupération")
-            elif selected_index in [2, 3]:
+            elif selected_index in [4, 5]:
                 # Click & Collect
                 session_data['requires_extra_steps'] = 'click_collect'
                 logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
                 logger.info("ℹ️  Click & Collect → Étape supplémentaire: lieu de récupération")
             else:
-                # Pas d'étapes supplémentaires
+                # Drive ou Guichet extérieur → pas d'étapes supplémentaires
                 session_data['requires_extra_steps'] = None
                 logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
         
