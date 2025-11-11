@@ -646,15 +646,29 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                     if not can_run:
                         self.log(f"⏸️ Impossible d'exécuter maintenant: {reason}", 'warning')
                         next_run = scheduler.calculate_next_run_time()
+                        scheduler.set_next_scheduled_time(next_run)
                         if next_run:
-                            self.log(f"⏰ Prochain run: {next_run.strftime('%d/%m/%Y à %H:%M')}", 'info')
-                            self.stats['next_survey'] = {
-                                'category': category,
-                                'time': next_run.strftime('%d/%m/%Y à %H:%M')
-                            }
-                            self.save_stats()
-                            self.root.after(0, self.update_stats_display)
-                        self.log("🛑 Arrêt du bot", 'warning')
+                            import time as time_module
+                            wait_seconds = int((next_run - datetime.now()).total_seconds())
+                            
+                            if wait_seconds > 0:
+                                self.log(f"⏰ Prochain run: {next_run.strftime('%d/%m/%Y à %H:%M')}", 'info')
+                                self.log(f"⏱️ Attente de {wait_seconds} secondes ({wait_seconds // 60} minutes)...", 'info')
+                                self.stats['next_survey'] = {
+                                    'category': category,
+                                    'time': next_run.strftime('%d/%m/%Y à %H:%M')
+                                }
+                                self.save_stats()
+                                self.root.after(0, self.update_stats_display)
+                                
+                                for i in range(wait_seconds):
+                                    if not self.bot_running:
+                                        break
+                                    time_module.sleep(1)
+                                
+                                continue
+                        
+                        self.log("🛑 Impossible de planifier le prochain questionnaire", 'warning')
                         self.stop_bot()
                         break
                     
@@ -727,21 +741,36 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                     if sched_status['remaining'] <= 0:
                         self.log("🎯 Quota journalier atteint!", 'success')
                         next_run = scheduler.calculate_next_run_time()
+                        scheduler.set_next_scheduled_time(next_run)
                         if next_run:
-                            next_category = random.choice(categories)
-                            self.log(f"⏰ Prochain run: {next_run.strftime('%d/%m/%Y à %H:%M')}", 'info')
-                            self.stats['next_survey'] = {
-                                'category': next_category,
-                                'time': next_run.strftime('%d/%m/%Y à %H:%M')
-                            }
-                            self.save_stats()
-                            self.root.after(0, self.update_stats_display)
-                        self.log("🛑 Arrêt du bot", 'warning')
+                            import time as time_module
+                            wait_seconds = int((next_run - datetime.now()).total_seconds())
+                            
+                            if wait_seconds > 0:
+                                next_category = random.choice(categories)
+                                self.log(f"⏰ Prochain run: {next_run.strftime('%d/%m/%Y à %H:%M')}", 'info')
+                                self.log(f"⏱️ Attente jusqu'à demain ({wait_seconds // 3600} heures)...", 'info')
+                                self.stats['next_survey'] = {
+                                    'category': next_category,
+                                    'time': next_run.strftime('%d/%m/%Y à %H:%M')
+                                }
+                                self.save_stats()
+                                self.root.after(0, self.update_stats_display)
+                                
+                                for i in range(wait_seconds):
+                                    if not self.bot_running:
+                                        break
+                                    time_module.sleep(1)
+                                
+                                continue
+                        
+                        self.log("🛑 Impossible de planifier le prochain questionnaire", 'warning')
                         self.stop_bot()
                         break
                     
                     # Calculer le délai avant le prochain questionnaire
                     next_run = scheduler.calculate_next_run_time()
+                    scheduler.set_next_scheduled_time(next_run)
                     if next_run:
                         import time as time_module
                         wait_seconds = int((next_run - datetime.now()).total_seconds())
@@ -761,10 +790,14 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                                 if not self.bot_running:
                                     break
                                 time_module.sleep(1)
+                        else:
+                            self.log("⏸️ Attente terminée, vérification des conditions...", 'info')
                     else:
-                        self.log("⏸️ Impossible de planifier le prochain questionnaire", 'warning')
-                        self.stop_bot()
-                        break
+                        self.log("⏸️ Impossible de planifier maintenant, nouvelle tentative dans 60 secondes...", 'warning')
+                        for i in range(60):
+                            if not self.bot_running:
+                                break
+                            time_module.sleep(1)
                 
                 except Exception as e:
                     self.stats['failed'] += 1

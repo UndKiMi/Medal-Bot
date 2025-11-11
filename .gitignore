@@ -43,6 +43,7 @@ data/
 *.db
 *.sqlite
 bot_stats.json
+scheduler_data.json
 
 # OS
 .DS_Store

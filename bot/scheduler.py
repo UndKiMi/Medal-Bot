@@ -4,6 +4,8 @@
 
 import random
 import logging
+import json
+from pathlib import Path
 from datetime import datetime, time, timedelta
 from typing import Optional, Tuple
 
@@ -31,8 +33,58 @@ class QuestionnaireScheduler:
     MAX_PAST_MINUTES = 5                # Maximum 5 minutes dans le passé
     
     def __init__(self):
-        self.today_count = 0
-        self.last_reset_date = datetime.now().date()
+        self.data_file = Path(__file__).parent.parent / "scheduler_data.json"
+        self._load_data()
+    
+    def _load_data(self):
+        """Charge les données depuis le fichier JSON."""
+        if self.data_file.exists():
+            try:
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.today_count = data.get('today_count', 0)
+                    last_date_str = data.get('last_reset_date')
+                    if last_date_str:
+                        self.last_reset_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
+                    else:
+                        self.last_reset_date = datetime.now().date()
+                    
+                    self.completed_times = data.get('completed_times', [])
+                    self.next_scheduled_time = data.get('next_scheduled_time')
+                    
+                    logger.info(f"📂 Données chargées: {self.today_count} questionnaires aujourd'hui ({self.last_reset_date})")
+                    if self.completed_times:
+                        logger.info(f"📅 Horaires effectués: {', '.join(self.completed_times)}")
+                    if self.next_scheduled_time:
+                        logger.info(f"⏰ Prochain horaire planifié: {self.next_scheduled_time}")
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur lors du chargement des données: {e}")
+                self.today_count = 0
+                self.last_reset_date = datetime.now().date()
+                self.completed_times = []
+                self.next_scheduled_time = None
+        else:
+            self.today_count = 0
+            self.last_reset_date = datetime.now().date()
+            self.completed_times = []
+            self.next_scheduled_time = None
+            logger.info("📂 Nouveau fichier de données créé")
+    
+    def _save_data(self):
+        """Sauvegarde les données dans le fichier JSON."""
+        try:
+            data = {
+                'today_count': self.today_count,
+                'last_reset_date': self.last_reset_date.strftime('%Y-%m-%d'),
+                'completed_times': self.completed_times,
+                'next_scheduled_time': self.next_scheduled_time,
+                'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            logger.debug(f"💾 Données sauvegardées: {self.today_count} questionnaires")
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la sauvegarde des données: {e}")
     
     def _reset_if_new_day(self):
         """Réinitialise le compteur si on est un nouveau jour."""
@@ -40,7 +92,10 @@ class QuestionnaireScheduler:
         if current_date != self.last_reset_date:
             self.today_count = 0
             self.last_reset_date = current_date
-            logger.info(f"📅 Nouveau jour détecté - Compteur réinitialisé")
+            self.completed_times = []
+            self.next_scheduled_time = None
+            self._save_data()
+            logger.info(f"📅 Nouveau jour détecté - Compteur et horaires réinitialisés")
     
     def can_run_questionnaire(self) -> Tuple[bool, str]:
         """
@@ -190,7 +245,23 @@ class QuestionnaireScheduler:
         """Incrémente le compteur de questionnaires du jour."""
         self._reset_if_new_day()
         self.today_count += 1
+        
+        current_time = datetime.now().strftime('%H:%M:%S')
+        self.completed_times.append(current_time)
+        
+        self._save_data()
         logger.info(f"📊 Questionnaires aujourd'hui: {self.today_count}/{self.DAILY_QUESTIONNAIRES}")
+        logger.info(f"⏰ Questionnaire effectué à: {current_time}")
+    
+    def set_next_scheduled_time(self, next_time: Optional[datetime]):
+        """Enregistre le prochain horaire planifié."""
+        if next_time:
+            self.next_scheduled_time = next_time.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            self.next_scheduled_time = None
+        self._save_data()
+        if self.next_scheduled_time:
+            logger.info(f"📅 Prochain horaire enregistré: {self.next_scheduled_time}")
     
     def get_status(self) -> dict:
         """Retourne le statut actuel du planificateur."""

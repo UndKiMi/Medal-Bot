@@ -442,59 +442,59 @@ def step_5_satisfaction_comment(driver) -> bool:
     """Étape 5: Satisfaction générale (premier smiley vert foncé) + commentaire"""
     logger.info("😊 Étape 5: Satisfaction générale + commentaire")
     try:
-        wait_random(1, 2)
+        wait_random(2, 3)
         
-        # 1. Cliquer sur le premier smiley (vert foncé = meilleure satisfaction)
-        try:
-            # Trouver tous les boutons radio de la page
-            all_radios = driver.find_elements(By.XPATH, "//input[@type='radio']")
-            
-            if all_radios and len(all_radios) > 0:
-                logger.info(f"📊 {len(all_radios)} smileys trouvés sur la page")
+        # 1. OBLIGATOIRE: Cliquer sur le premier smiley (vert foncé = meilleure satisfaction)
+        smiley_selected = False
+        max_attempts = 3
+        
+        for attempt in range(max_attempts):
+            try:
+                all_radios = driver.find_elements(By.XPATH, "//input[@type='radio']")
                 
-                # Le premier radio de cette page est le smiley vert foncé
-                first_smiley = all_radios[0]
-                
-                # Faire défiler et attendre
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_smiley)
-                wait_random(0.5, 1)
-                
-                # Forcer le clic avec plusieurs méthodes
-                try:
-                    # Méthode 1 : Clic JavaScript
-                    driver.execute_script("arguments[0].click();", first_smiley)
-                    wait_random(0.3, 0.5)
-                except:
-                    pass
-                
-                # Méthode 2 : Forcer checked=true
-                driver.execute_script("arguments[0].checked = true;", first_smiley)
-                wait_random(0.2, 0.4)
-                
-                # Méthode 3 : Trigger change event
-                driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", first_smiley)
-                
-                # Vérifier qu'il est bien coché
-                is_checked = driver.execute_script("return arguments[0].checked;", first_smiley)
-                if is_checked:
-                    logger.info("✅ Premier smiley vert foncé confirmé coché")
-                else:
-                    logger.warning("⚠️ Le smiley ne semble pas coché, dernière tentative...")
-                    # Clic sur le label parent
-                    try:
-                        parent_label = driver.execute_script("return arguments[0].parentElement;", first_smiley)
+                if all_radios and len(all_radios) >= 5:
+                    logger.info(f"📊 Tentative {attempt + 1}/{max_attempts}: {len(all_radios)} smileys trouvés")
+                    
+                    first_smiley = all_radios[0]
+                    
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_smiley)
+                    wait_random(1, 1.5)
+                    
+                    parent_label = driver.execute_script("return arguments[0].closest('label') || arguments[0].parentElement;", first_smiley)
+                    if parent_label:
                         driver.execute_script("arguments[0].click();", parent_label)
-                    except:
-                        pass
-        except Exception as e:
-            logger.warning(f"⚠️ Erreur lors de la sélection du smiley: {e}")
+                        wait_random(0.5, 0.8)
+                    
+                    driver.execute_script("arguments[0].checked = true;", first_smiley)
+                    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", first_smiley)
+                    driver.execute_script("arguments[0].dispatchEvent(new Event('click', { bubbles: true }));", first_smiley)
+                    wait_random(0.5, 1)
+                    
+                    is_checked = driver.execute_script("return arguments[0].checked;", first_smiley)
+                    if is_checked:
+                        logger.info("✅ Premier smiley vert foncé CONFIRMÉ coché")
+                        smiley_selected = True
+                        break
+                    else:
+                        logger.warning(f"⚠️ Tentative {attempt + 1} échouée, le smiley n'est pas coché")
+                        wait_random(0.5, 1)
+                else:
+                    logger.warning(f"⚠️ Pas assez de smileys trouvés: {len(all_radios)}")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur tentative {attempt + 1}: {e}")
+                wait_random(0.5, 1)
         
-        wait_random(1, 2)
+        if not smiley_selected:
+            logger.error("❌ ÉCHEC: Impossible de sélectionner le smiley après 3 tentatives")
+            return False
         
-        # 2. Saisir le commentaire
+        wait_random(1.5, 2)
+        
+        # 2. OBLIGATOIRE: Saisir le commentaire
+        commentaire_saisi = False
+        
         try:
-            # Chercher le textarea avec plusieurs sélecteurs
-            textarea = None
             selectors = [
                 "//textarea",
                 "//textarea[@placeholder]",
@@ -502,6 +502,7 @@ def step_5_satisfaction_comment(driver) -> bool:
                 "//textarea[contains(@id, 'comment')]"
             ]
             
+            textarea = None
             for selector in selectors:
                 try:
                     textarea = driver.find_element(By.XPATH, selector)
@@ -511,29 +512,64 @@ def step_5_satisfaction_comment(driver) -> bool:
                 except:
                     continue
             
-            if textarea:
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", textarea)
-                wait_random(0.5, 1)
-                
-                # Récupérer un avis depuis les fichiers
-                commentaire = pick_avis(session_data.get('current_category'))
-                
-                # Cliquer et saisir
-                textarea.click()
-                wait_random(0.3, 0.7)
-                textarea.clear()
-                human_typing(textarea, commentaire)
-                logger.info(f"✅ Commentaire saisi: {commentaire[:50]}...")
+            if not textarea:
+                logger.error("❌ ÉCHEC: Textarea non trouvé")
+                return False
+            
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", textarea)
+            wait_random(0.8, 1.2)
+            
+            commentaire = pick_avis(session_data.get('current_category'))
+            if not commentaire:
+                logger.error("❌ ÉCHEC: Aucun commentaire disponible")
+                return False
+            
+            textarea.click()
+            wait_random(0.5, 0.8)
+            textarea.clear()
+            wait_random(0.3, 0.5)
+            human_typing(textarea, commentaire)
+            wait_random(0.5, 1)
+            
+            valeur_saisie = textarea.get_attribute('value')
+            if valeur_saisie and len(valeur_saisie) > 10:
+                logger.info(f"✅ Commentaire CONFIRMÉ saisi: {commentaire[:50]}...")
+                commentaire_saisi = True
             else:
-                logger.warning("⚠️ Textarea non trouvé avec tous les sélecteurs")
+                logger.error(f"❌ ÉCHEC: Commentaire non saisi correctement (valeur: '{valeur_saisie}')")
+                return False
                 
         except Exception as e:
-            logger.warning(f"⚠️ Erreur lors de la saisie du commentaire: {e}")
+            logger.error(f"❌ ÉCHEC lors de la saisie du commentaire: {e}")
+            return False
         
-        # Cliquer sur Suivant
-        wait_random(1, 2)
-        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
-        driver.execute_script("arguments[0].click();", next_button)
+        if not commentaire_saisi:
+            logger.error("❌ ÉCHEC: Le commentaire n'a pas été saisi")
+            return False
+        
+        # 3. Cliquer sur Suivant SEULEMENT si smiley ET commentaire OK
+        wait_random(2, 3)
+        
+        try:
+            next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
+            
+            is_disabled = driver.execute_script("return arguments[0].disabled || arguments[0].hasAttribute('disabled');", next_button)
+            if is_disabled:
+                logger.warning("⚠️ Le bouton Suivant est désactivé, attente supplémentaire...")
+                wait_random(2, 3)
+                is_disabled = driver.execute_script("return arguments[0].disabled || arguments[0].hasAttribute('disabled');", next_button)
+                if is_disabled:
+                    logger.error("❌ Le bouton Suivant reste désactivé")
+                    return False
+            
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
+            wait_random(0.8, 1.2)
+            driver.execute_script("arguments[0].click();", next_button)
+            logger.info("✅ Clic sur Suivant effectué")
+            
+        except Exception as btn_err:
+            logger.error(f"❌ Erreur lors du clic sur Suivant: {btn_err}")
+            return False
         
         wait_random(2, 3)
         return True
