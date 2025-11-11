@@ -35,7 +35,15 @@ class AvisManager:
             # Charger depuis le cache ou lire le fichier
             if avis_file not in self._cache:
                 with open(avis_file, 'r', encoding='utf-8') as f:
-                    self._cache[avis_file] = [line.strip() for line in f if line.strip()]
+                    avis_lines = []
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('AVIS'):
+                            import re
+                            cleaned_line = re.sub(r'^\d+\.\s*', '', line)
+                            if cleaned_line:
+                                avis_lines.append(cleaned_line)
+                    self._cache[avis_file] = avis_lines
             
             avis_list = self._cache[avis_file]
             

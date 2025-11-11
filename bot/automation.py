@@ -110,19 +110,33 @@ def human_typing(element: WebElement, text: str) -> None:
 def pick_avis(category: str = None) -> str:
     """Sélectionne un avis aléatoire en fonction de la catégorie."""
     try:
+        logger.info(f"📋 Catégorie reçue: '{category}'")
+        logger.info(f"📋 session_data complet: {session_data}")
+        
         if not category or category not in AVIS_MAPPING:
+            logger.warning(f"⚠️ Catégorie '{category}' non trouvée dans AVIS_MAPPING, utilisation de 'drive' par défaut")
+            logger.info(f"📋 Catégories disponibles: {list(AVIS_MAPPING.keys())}")
             avis_file = AVIS_MAPPING.get('drive')
         else:
             avis_file = AVIS_MAPPING.get(category)
         
+        logger.info(f"📁 Fichier d'avis sélectionné: {avis_file}")
         session_data['current_avis_file'] = avis_file
         
         if not os.path.exists(avis_file):
             logger.error(f"❌ Fichier d'avis introuvable: {avis_file}")
+            logger.error(f"❌ Chemin absolu vérifié: {os.path.abspath(avis_file)}")
             return "Excellent service, très satisfait de ma visite !"
         
         with open(avis_file, 'r', encoding='utf-8') as f:
-            avis_list = [line.strip() for line in f if line.strip()]
+            import re
+            avis_list = []
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('AVIS'):
+                    cleaned_line = re.sub(r'^\d+\.\s*', '', line)
+                    if cleaned_line:
+                        avis_list.append(cleaned_line)
         
         if not avis_list:
             logger.error(f"❌ Aucun avis trouvé dans le fichier: {avis_file}")
@@ -314,16 +328,19 @@ def step_4_order_location(driver) -> bool:
             if selected_index in [0, 1]:
                 # Borne ou Comptoir
                 session_data['requires_extra_steps'] = 'borne_comptoir'
+                session_data['order_location'] = 'borne' if selected_index == 0 else 'comptoir'
                 logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
                 logger.info("ℹ️  Borne/Comptoir → Étapes supplémentaires: consommation + récupération")
             elif selected_index in [4, 5]:
                 # Click & Collect
                 session_data['requires_extra_steps'] = 'click_collect'
+                session_data['order_location'] = 'cc_appli' if selected_index == 4 else 'cc_site'
                 logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
                 logger.info("ℹ️  Click & Collect → Étape supplémentaire: lieu de récupération")
             else:
                 # Drive ou Guichet extérieur → pas d'étapes supplémentaires
                 session_data['requires_extra_steps'] = None
+                session_data['current_category'] = 'drive'
                 logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
         
         # Cliquer sur Suivant
@@ -352,11 +369,15 @@ def step_4b_consumption_type(driver) -> bool:
         
         if consumption_radios and len(consumption_radios) >= 2:
             # Choisir aléatoirement entre sur place (0) ou à emporter (1)
-            selected_radio = random.choice(consumption_radios[:2])
+            selected_index = random.randint(0, 1)
+            selected_radio = consumption_radios[selected_index]
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
             wait_random(0.3, 0.7)
             driver.execute_script("arguments[0].click();", selected_radio)
-            logger.info("✅ Type de consommation sélectionné")
+            
+            # Stocker le type de consommation
+            session_data['consumption_type'] = 'sur_place' if selected_index == 0 else 'emporter'
+            logger.info(f"✅ Type de consommation sélectionné: {session_data['consumption_type']}")
         
         # Cliquer sur Suivant
         wait_random(1, 2)
@@ -388,7 +409,12 @@ def step_4c_pickup_location(driver) -> bool:
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
             wait_random(0.3, 0.7)
             driver.execute_script("arguments[0].click();", selected_radio)
-            logger.info("✅ Lieu de récupération sélectionné (Au comptoir / En service à table)")
+            
+            # Définir la catégorie finale pour les avis
+            order_loc = session_data.get('order_location', 'borne')
+            consumption = session_data.get('consumption_type', 'sur_place')
+            session_data['current_category'] = f"{order_loc}_{consumption}"
+            logger.info(f"✅ Lieu de récupération sélectionné - Catégorie: {session_data['current_category']}")
         
         # Cliquer sur Suivant
         wait_random(1, 2)
@@ -420,11 +446,17 @@ def step_4d_click_collect_pickup(driver) -> bool:
             # 1 = Au drive
             # 2 = Au guichet extérieur de vente à emporter
             # 3 = A l'extérieur du restaurant
-            selected_radio = random.choice(pickup_radios[:4])
+            selected_index = random.randint(0, 3)
+            selected_radio = pickup_radios[selected_index]
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
             wait_random(0.3, 0.7)
             driver.execute_script("arguments[0].click();", selected_radio)
-            logger.info("✅ Lieu de récupération Click & Collect sélectionné")
+            
+            # Définir la catégorie finale pour les avis
+            order_loc = session_data.get('order_location', 'cc_appli')
+            pickup_locations = ['comptoir', 'drive', 'guichet', 'exterieur']
+            session_data['current_category'] = f"{order_loc}_{pickup_locations[selected_index]}"
+            logger.info(f"✅ Lieu de récupération Click & Collect sélectionné - Catégorie: {session_data['current_category']}")
         
         # Cliquer sur Suivant
         wait_random(1, 2)
@@ -439,13 +471,93 @@ def step_4d_click_collect_pickup(driver) -> bool:
         logger.debug(f"Détails: {traceback.format_exc()}")
         return False
 
+def find_best_satisfaction_smiley(driver, all_radios):
+    """Trouve le smiley de meilleure satisfaction en analysant les attributs."""
+    try:
+        logger.info(f"🔍 Analyse de {len(all_radios)} smileys pour trouver le vert foncé...")
+        
+        smiley_data = []
+        for idx, radio in enumerate(all_radios):
+            try:
+                # Récupérer tous les attributs possibles
+                value = driver.execute_script("return arguments[0].value;", radio)
+                aria_label = driver.execute_script("return arguments[0].getAttribute('aria-label');", radio)
+                aria_posinset = driver.execute_script("return arguments[0].getAttribute('aria-posinset');", radio)
+                data_value = driver.execute_script("return arguments[0].getAttribute('data-value');", radio)
+                data_mds_value = driver.execute_script("return arguments[0].getAttribute('data-mds-value');", radio)
+                name = driver.execute_script("return arguments[0].name;", radio)
+                id_attr = driver.execute_script("return arguments[0].id;", radio)
+                
+                # Récupérer les classes du label parent
+                parent_classes = driver.execute_script("""
+                    var label = arguments[0].closest('label');
+                    return label ? label.className : '';
+                """, radio)
+                
+                smiley_data.append({
+                    'index': idx,
+                    'element': radio,
+                    'value': value,
+                    'aria_label': aria_label,
+                    'aria_posinset': aria_posinset,
+                    'data_value': data_value,
+                    'data_mds_value': data_mds_value,
+                    'name': name,
+                    'id': id_attr,
+                    'parent_classes': parent_classes
+                })
+                
+                logger.info(f"  Smiley {idx}: value={value}, aria-label=\"{aria_label}\", aria-posinset={aria_posinset}")
+                
+            except Exception as e:
+                logger.warning(f"  ⚠️ Erreur analyse smiley {idx}: {e}")
+        
+        # Trouver le meilleur smiley
+        # Structure Medallia: aria-posinset="1" + aria-label="Très satisfait" + value="1"
+        best_smiley = None
+        
+        # Stratégie 1: Chercher aria-label="Très satisfait" (le plus fiable)
+        for data in smiley_data:
+            aria = str(data['aria_label']).lower() if data['aria_label'] else ''
+            if 'très satisfait' in aria or 'very satisfied' in aria:
+                logger.info(f"✅ Smiley trouvé par aria-label=\"{data['aria_label']}\" (index {data['index']})")
+                best_smiley = data['element']
+                break
+        
+        # Stratégie 2: Chercher value="1" (Medallia utilise 1=meilleur, 5=pire)
+        if not best_smiley:
+            for data in smiley_data:
+                if data['value'] == '1':
+                    logger.info(f"✅ Smiley trouvé par value=1 (index {data['index']})")
+                    best_smiley = data['element']
+                    break
+        
+        # Stratégie 3: Chercher aria-posinset="1"
+        if not best_smiley:
+            for data in smiley_data:
+                if data['aria_posinset'] == '1':
+                    logger.info(f"✅ Smiley trouvé par aria-posinset=1 (index {data['index']})")
+                    best_smiley = data['element']
+                    break
+        
+        # Stratégie 4: Prendre le premier (généralement le meilleur sur Medallia)
+        if not best_smiley and smiley_data:
+            best_smiley = smiley_data[0]['element']
+            logger.info(f"✅ Smiley sélectionné: premier de la liste (index 0)")
+        
+        return best_smiley
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de l'analyse des smileys: {e}")
+        return all_radios[0] if all_radios else None
+
 def step_5_satisfaction_comment(driver) -> bool:
     """Étape 5: Satisfaction générale (premier smiley vert foncé) + commentaire"""
     logger.info("😊 Étape 5: Satisfaction générale + commentaire")
     try:
         wait_random(2, 3)
         
-        # 1. OBLIGATOIRE: Cliquer sur le premier smiley (vert foncé = meilleure satisfaction)
+        # 1. OBLIGATOIRE: Cliquer sur le smiley vert foncé (meilleure satisfaction)
         smiley_selected = False
         max_attempts = 3
         
@@ -453,27 +565,33 @@ def step_5_satisfaction_comment(driver) -> bool:
             try:
                 all_radios = driver.find_elements(By.XPATH, "//input[@type='radio']")
                 
-                if all_radios and len(all_radios) >= 5:
+                if all_radios and len(all_radios) >= 4:
                     logger.info(f"📊 Tentative {attempt + 1}/{max_attempts}: {len(all_radios)} smileys trouvés")
                     
-                    first_smiley = all_radios[0]
+                    # Analyser et trouver le meilleur smiley
+                    best_smiley = find_best_satisfaction_smiley(driver, all_radios)
                     
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_smiley)
+                    if not best_smiley:
+                        logger.warning(f"⚠️ Aucun smiley trouvé à la tentative {attempt + 1}")
+                        wait_random(0.5, 1)
+                        continue
+                    
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", best_smiley)
                     wait_random(1, 1.5)
                     
-                    parent_label = driver.execute_script("return arguments[0].closest('label') || arguments[0].parentElement;", first_smiley)
+                    parent_label = driver.execute_script("return arguments[0].closest('label') || arguments[0].parentElement;", best_smiley)
                     if parent_label:
                         driver.execute_script("arguments[0].click();", parent_label)
                         wait_random(0.5, 0.8)
                     
-                    driver.execute_script("arguments[0].checked = true;", first_smiley)
-                    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", first_smiley)
-                    driver.execute_script("arguments[0].dispatchEvent(new Event('click', { bubbles: true }));", first_smiley)
+                    driver.execute_script("arguments[0].checked = true;", best_smiley)
+                    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", best_smiley)
+                    driver.execute_script("arguments[0].dispatchEvent(new Event('click', { bubbles: true }));", best_smiley)
                     wait_random(0.5, 1)
                     
-                    is_checked = driver.execute_script("return arguments[0].checked;", first_smiley)
+                    is_checked = driver.execute_script("return arguments[0].checked;", best_smiley)
                     if is_checked:
-                        logger.info("✅ Premier smiley vert foncé CONFIRMÉ coché")
+                        logger.info("✅ Smiley vert foncé (meilleure satisfaction) CONFIRMÉ coché")
                         smiley_selected = True
                         break
                     else:
@@ -529,15 +647,20 @@ def step_5_satisfaction_comment(driver) -> bool:
             wait_random(0.5, 0.8)
             textarea.clear()
             wait_random(0.3, 0.5)
-            human_typing(textarea, commentaire)
-            wait_random(0.5, 1)
             
-            valeur_saisie = textarea.get_attribute('value')
-            if valeur_saisie and len(valeur_saisie) > 10:
-                logger.info(f"✅ Commentaire CONFIRMÉ saisi: {commentaire[:50]}...")
+            logger.info(f"📝 Début de la saisie du commentaire: {commentaire[:50]}...")
+            human_typing(textarea, commentaire)
+            wait_random(1, 1.5)
+            
+            valeur_saisie = driver.execute_script("return arguments[0].value || arguments[0].textContent || arguments[0].innerHTML;", textarea)
+            logger.info(f"🔍 Vérification: valeur récupérée = '{valeur_saisie[:50] if valeur_saisie else 'VIDE'}...'")
+            
+            if valeur_saisie and len(valeur_saisie.strip()) > 10:
+                logger.info(f"✅ Commentaire CONFIRMÉ saisi ({len(valeur_saisie)} caractères)")
                 commentaire_saisi = True
             else:
-                logger.error(f"❌ ÉCHEC: Commentaire non saisi correctement (valeur: '{valeur_saisie}')")
+                logger.error(f"❌ ÉCHEC: Commentaire non saisi correctement (longueur: {len(valeur_saisie) if valeur_saisie else 0})")
+                logger.error(f"❌ Contenu récupéré: '{valeur_saisie}'")
                 return False
                 
         except Exception as e:

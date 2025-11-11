@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('C:\\Users\\antho\\Desktop\\Medal-Bot\\bot', 'bot'), ('C:\\Users\\antho\\Desktop\\Medal-Bot\\config.yaml', '.'), ('C:\\Users\\antho\\Desktop\\Medal-Bot\\.env', '.')]
+datas = [('C:\\Users\\antho\\Desktop\\Medal-Bot\\bot', 'bot'), ('C:\\Users\\antho\\Desktop\\Medal-Bot\\AVIS', 'AVIS'), ('C:\\Users\\antho\\Desktop\\Medal-Bot\\config.yaml', '.'), ('C:\\Users\\antho\\Desktop\\Medal-Bot\\.env', '.')]
 binaries = []
 hiddenimports = ['selenium', 'undetected_chromedriver', 'selenium_stealth', 'tkinter', 'yaml', 'dotenv', 'psutil', 'dateutil']
 tmp_ret = collect_all('selenium')
