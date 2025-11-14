@@ -35,7 +35,7 @@ def setup_driver(chrome_options: dict) -> Optional[uc.Chrome]:
         }
         options.add_experimental_option("prefs", prefs)
         
-        logger.info("🔧 Création du driver Chrome...")
+        # Création du driver (logs détaillés supprimés pour la console)
         driver = uc.Chrome(
             options=options,
             use_subprocess=True,
@@ -44,7 +44,7 @@ def setup_driver(chrome_options: dict) -> Optional[uc.Chrome]:
             driver_executable_path=None
         )
         
-        logger.info("🎨 Application des paramètres de furtivité...")
+        # Application des paramètres de furtivité
         stealth(
             driver,
             languages=chrome_options['languages'],
@@ -56,7 +56,7 @@ def setup_driver(chrome_options: dict) -> Optional[uc.Chrome]:
             user_agent=chrome_options["user_agent"]
         )
         
-        logger.info("📜 Injection des scripts anti-détection...")
+        # Injection des scripts anti-détection
         driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
             'source': '''
                 Object.defineProperty(navigator, 'webdriver', {
@@ -77,17 +77,17 @@ def setup_driver(chrome_options: dict) -> Optional[uc.Chrome]:
             '''
         })
         
-        logger.info("📐 Configuration de la fenêtre...")
+        # Configuration de la fenêtre
         width, height = map(int, chrome_options['window_size'].split(','))
         width += random.randint(-20, 20)
         height += random.randint(-20, 20)
         driver.set_window_size(width, height)
         
-        logger.info("🖱️ Simulation de mouvement de souris...")
+        # Simulation de mouvement de souris
         action = ActionChains(driver)
         action.move_by_offset(random.randint(0, 100), random.randint(0, 100)).perform()
         
-        logger.info("✅ Navigateur initialisé avec anti-détection avancée")
+        logger.info("✅ Navigateur initialisé")
         return driver
         
     except Exception as e:

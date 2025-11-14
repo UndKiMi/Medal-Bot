@@ -91,8 +91,7 @@ def run_survey_bot(driver: uc.Chrome) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur critique: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Erreur critique: {str(e)}")
         return False
 
 
@@ -124,8 +123,7 @@ def _execute_step(driver, step_func, step_name: str, step_num: Union[int, str]) 
                 import time
                 time.sleep(retry_delay * attempt)
             else:
-                logger.error(f"❌ Erreur à l'étape {step_num} ({step_name}) après {max_retries} tentatives: {e}")
-                logger.debug(f"Détails: {traceback.format_exc()}")
+                logger.error(f"❌ Étape {step_num} ({step_name}) échouée après {max_retries} tentatives: {str(e)}")
                 return False
     
     return False

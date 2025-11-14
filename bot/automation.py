@@ -118,8 +118,6 @@ def human_typing(element: WebElement, text: str) -> None:
 def pick_avis(category: str = None) -> str:
     """Sélectionne un avis aléatoire en fonction de la catégorie (utilise le cache)."""
     try:
-        logger.info(f"📋 Catégorie reçue: '{category}'")
-        
         # Utiliser le gestionnaire d'avis avec cache
         selected_avis = avis_manager.load_avis(category)
         session_data['current_avis_file'] = avis_manager.avis_mapping.get(category or 'drive')
@@ -127,7 +125,7 @@ def pick_avis(category: str = None) -> str:
         return selected_avis
         
     except Exception as e:
-        logger.error(f"❌ Erreur lors de la sélection de l'avis: {e}")
+        logger.error(f"❌ Erreur sélection avis ({category}): {e}")
         return "Excellent service, très satisfait de ma visite !"
 
 # ============================================================================
@@ -172,8 +170,7 @@ def step_1_start_survey(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 1: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 1 échouée: {str(e)}")
         return False
 
 def step_2_age_selection(driver) -> bool:
@@ -205,8 +202,7 @@ def step_2_age_selection(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 2: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 2 échouée: {str(e)}")
         return False
 
 def step_3_ticket_info(driver) -> bool:
@@ -278,8 +274,7 @@ def step_3_ticket_info(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 3: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 3 échouée: {str(e)}")
         return False
 
 def step_4_order_location(driver) -> bool:
@@ -344,8 +339,7 @@ def step_4_order_location(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 4: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 4 échouée: {str(e)}")
         return False
 
 def step_4b_consumption_type(driver) -> bool:
@@ -380,8 +374,7 @@ def step_4b_consumption_type(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 4b: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 4b échouée: {str(e)}")
         return False
 
 def step_4c_pickup_location(driver) -> bool:
@@ -417,8 +410,7 @@ def step_4c_pickup_location(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 4c: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 4c échouée: {str(e)}")
         return False
 
 def step_4d_click_collect_pickup(driver) -> bool:
@@ -459,8 +451,7 @@ def step_4d_click_collect_pickup(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 4d: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 4d échouée: {str(e)}")
         return False
 
 def find_best_satisfaction_smiley(driver, all_radios):
@@ -691,8 +682,7 @@ def step_5_satisfaction_comment(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 5: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 5 échouée: {str(e)}")
         return False
 
 def step_6_dimension_ratings(driver) -> bool:
@@ -770,8 +760,7 @@ def step_6_dimension_ratings(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 6: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 6 échouée: {str(e)}")
         return False
 
 def step_7_order_accuracy(driver) -> bool:
@@ -797,8 +786,7 @@ def step_7_order_accuracy(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 7: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 7 échouée: {str(e)}")
         return False
 
 def step_8_problem_encountered(driver) -> bool:
@@ -825,8 +813,7 @@ def step_8_problem_encountered(driver) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"❌ Erreur étape 8: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
+        logger.error(f"❌ Étape 8 échouée: {str(e)}")
         return False
 
 # ============================================================================

@@ -52,7 +52,7 @@ class AvisManager:
                 return "Excellent service, très satisfait de ma visite !"
             
             selected_avis = random.choice(avis_list)
-            logger.info(f"📝 Avis sélectionné: {selected_avis[:50]}...")
+            # Log supprimé (trop verbeux pour la console)
             
             return selected_avis
             
