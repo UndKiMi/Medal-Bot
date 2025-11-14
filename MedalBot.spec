@@ -1,9 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('C:\\Users\\antho\\Desktop\\Medal-Bot\\bot', 'bot'), ('C:\\Users\\antho\\Desktop\\Medal-Bot\\AVIS', 'AVIS'), ('C:\\Users\\antho\\Desktop\\Medal-Bot\\config.yaml', '.'), ('C:\\Users\\antho\\Desktop\\Medal-Bot\\.env', '.')]
+import os
+project_dir = os.path.dirname(os.path.abspath(SPEC))
+
+datas = [
+    (os.path.join(project_dir, 'bot'), 'bot'),
+    (os.path.join(project_dir, 'AVIS'), 'AVIS'),
+    (os.path.join(project_dir, 'config.yaml'), '.'),
+    (os.path.join(project_dir, '.env'), '.'),
+]
 binaries = []
-hiddenimports = ['selenium', 'undetected_chromedriver', 'selenium_stealth', 'tkinter', 'yaml', 'dotenv', 'psutil', 'dateutil']
+hiddenimports = [
+    'selenium', 'undetected_chromedriver', 'selenium_stealth', 
+    'tkinter', 'yaml', 'dotenv', 'psutil', 'dateutil',
+    'win10toast',  # Pour notifications (#21)
+    'matplotlib', 'matplotlib.pyplot', 'matplotlib.backends.backend_tkagg',  # Pour graphiques (#22)
+]
 tmp_ret = collect_all('selenium')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('undetected_chromedriver')
