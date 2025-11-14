@@ -30,7 +30,6 @@ class QuestionnaireScheduler:
     BOT_START_TIME = time(11, 30)       # Jamais avant 11h30
     BOT_END_TIME = time(21, 38)         # Jamais après 21h38
     DAILY_QUESTIONNAIRES = 6            # 6 questionnaires par jour
-    MAX_PAST_MINUTES = 5                # Maximum 5 minutes dans le passé
     
     def __init__(self):
         self.data_file = Path(__file__).parent.parent / "scheduler_data.json"
@@ -133,8 +132,8 @@ class QuestionnaireScheduler:
         Génère une heure de visite aléatoire réaliste.
         
         L'heure doit être:
-        - Entre 11h30 et l'heure actuelle
-        - Maximum 5 minutes dans le passé par rapport à maintenant
+        - Soit l'heure actuelle
+        - Soit maximum 1h en arrière par rapport à maintenant
         - Jamais dans le futur
         
         Returns:
@@ -143,32 +142,33 @@ class QuestionnaireScheduler:
         now = datetime.now()
         current_time = now.time()
         
-        # Définir la plage horaire disponible
-        start_time = datetime.combine(now.date(), self.BOT_START_TIME)
+        # L'heure maximale est maintenant
+        max_time = now
         
-        # L'heure maximale est soit maintenant, soit 5 minutes avant maintenant
-        # On choisit aléatoirement pour varier
-        if random.random() < 0.7:  # 70% du temps, on peut aller jusqu'à maintenant
-            end_time = now
-        else:  # 30% du temps, on recule de 1-5 minutes
-            minutes_back = random.randint(1, self.MAX_PAST_MINUTES)
-            end_time = now - timedelta(minutes=minutes_back)
+        # L'heure minimale est 1h avant maintenant (maximum 1h en arrière)
+        min_time = now - timedelta(hours=1)
+        
+        # Vérifier qu'on ne dépasse pas l'heure d'ouverture du bot (11h30)
+        bot_start_datetime = datetime.combine(now.date(), self.BOT_START_TIME)
+        if min_time < bot_start_datetime:
+            min_time = bot_start_datetime
         
         # Vérifier qu'on a une plage valide
-        if end_time <= start_time:
-            logger.warning("⚠️ Impossible de générer une heure de visite (trop tôt)")
+        if min_time >= max_time:
+            logger.warning("⚠️ Impossible de générer une heure de visite (plage invalide)")
             return None
         
+        # Choisir un moment aléatoire entre min_time et max_time
         # Calculer la différence en minutes
-        time_diff = (end_time - start_time).total_seconds() / 60
+        time_diff_minutes = (max_time - min_time).total_seconds() / 60
         
-        if time_diff < 1:
-            logger.warning("⚠️ Plage horaire trop courte")
-            return None
-        
-        # Choisir un moment aléatoire dans cette plage
-        random_minutes = random.randint(0, int(time_diff))
-        visit_time = start_time + timedelta(minutes=random_minutes)
+        if time_diff_minutes < 1:
+            # Si la plage est très courte, utiliser l'heure actuelle
+            visit_time = now
+        else:
+            # Choisir un nombre aléatoire de minutes entre 0 et la différence
+            random_minutes = random.randint(0, int(time_diff_minutes))
+            visit_time = min_time + timedelta(minutes=random_minutes)
         
         # Formater pour le questionnaire
         date_str = visit_time.strftime("%d/%m/%Y")
@@ -176,7 +176,7 @@ class QuestionnaireScheduler:
         minute_str = visit_time.strftime("%M")
         
         logger.info(f"🕐 Heure de visite générée: {visit_time.strftime('%d/%m/%Y à %H:%M')}")
-        logger.info(f"   (Maintenant: {now.strftime('%H:%M')}, Plage: {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')})")
+        logger.info(f"   (Maintenant: {now.strftime('%H:%M')}, Plage: {min_time.strftime('%H:%M')} - {max_time.strftime('%H:%M')})")
         
         return date_str, hour_str, minute_str
     

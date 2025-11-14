@@ -20,6 +20,7 @@ sys.path.append(str(Path(__file__).parent))
 
 from bot.config_loader import config
 from bot.utils.driver_manager import setup_driver, cleanup_driver
+from bot.utils.helpers import wait_with_check
 from bot.survey_runner import run_survey_bot
 from bot.scheduler import scheduler
 
@@ -661,10 +662,9 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                                 self.save_stats()
                                 self.root.after(0, self.update_stats_display)
                                 
-                                for i in range(wait_seconds):
-                                    if not self.bot_running:
-                                        break
-                                    time_module.sleep(1)
+                                # Optimisation: attente avec vérification périodique
+                                if not wait_with_check(wait_seconds, check_interval=1.0, stop_condition=lambda: not self.bot_running):
+                                    break  # Bot arrêté pendant l'attente
                                 
                                 continue
                         
@@ -757,10 +757,9 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                                 self.save_stats()
                                 self.root.after(0, self.update_stats_display)
                                 
-                                for i in range(wait_seconds):
-                                    if not self.bot_running:
-                                        break
-                                    time_module.sleep(1)
+                                # Optimisation: attente avec vérification périodique
+                                if not wait_with_check(wait_seconds, check_interval=1.0, stop_condition=lambda: not self.bot_running):
+                                    break  # Bot arrêté pendant l'attente
                                 
                                 continue
                         
@@ -786,18 +785,16 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                             self.save_stats()
                             self.root.after(0, self.update_stats_display)
                             
-                            for i in range(wait_seconds):
-                                if not self.bot_running:
-                                    break
-                                time_module.sleep(1)
+                            # Optimisation: attente avec vérification périodique
+                            if not wait_with_check(wait_seconds, check_interval=1.0, stop_condition=lambda: not self.bot_running):
+                                break  # Bot arrêté pendant l'attente
                         else:
                             self.log("⏸️ Attente terminée, vérification des conditions...", 'info')
                     else:
                         self.log("⏸️ Impossible de planifier maintenant, nouvelle tentative dans 60 secondes...", 'warning')
-                        for i in range(60):
-                            if not self.bot_running:
-                                break
-                            time_module.sleep(1)
+                        # Optimisation: attente avec vérification périodique
+                        if not wait_with_check(60, check_interval=1.0, stop_condition=lambda: not self.bot_running):
+                            break  # Bot arrêté pendant l'attente
                 
                 except Exception as e:
                     self.stats['failed'] += 1

@@ -10,6 +10,8 @@ from typing import Dict, Union
 import undetected_chromedriver as uc
 
 from bot.config_loader import config
+from bot.config import TIMEOUTS
+from bot.utils.helpers import retry_on_failure
 from bot.automation import (
     step_1_start_survey,
     step_2_age_selection,
@@ -95,20 +97,38 @@ def run_survey_bot(driver: uc.Chrome) -> bool:
 
 
 def _execute_step(driver, step_func, step_name: str, step_num: Union[int, str]) -> bool:
-    """Exécute une étape du questionnaire."""
-    try:
-        result = step_func(driver)
+    """Exécute une étape du questionnaire avec retry automatique."""
+    max_retries = TIMEOUTS.get('max_retries', 3)
+    retry_delay = TIMEOUTS.get('retry_delay', 2)
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            result = step_func(driver)
+            
+            if result:
+                if attempt > 1:
+                    logger.info(f"✅ Étape {step_num} réussie après {attempt} tentatives: {step_name}")
+                return True
+            else:
+                if attempt < max_retries:
+                    logger.warning(f"⚠️ Tentative {attempt}/{max_retries} échouée pour l'étape {step_num}: {step_name}")
+                    import time
+                    time.sleep(retry_delay * attempt)  # Backoff exponentiel
+                else:
+                    logger.error(f"❌ Échec de l'étape {step_num} après {max_retries} tentatives: {step_name}")
+                    return False
         
-        if not result:
-            logger.error(f"❌ Échec de l'étape {step_num}: {step_name}")
-            return False
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Erreur à l'étape {step_num} ({step_name}): {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
-        return False
+        except Exception as e:
+            if attempt < max_retries:
+                logger.warning(f"⚠️ Erreur à l'étape {step_num} (tentative {attempt}/{max_retries}): {e}")
+                import time
+                time.sleep(retry_delay * attempt)
+            else:
+                logger.error(f"❌ Erreur à l'étape {step_num} ({step_name}) après {max_retries} tentatives: {e}")
+                logger.debug(f"Détails: {traceback.format_exc()}")
+                return False
+    
+    return False
 
 
 def get_session_data() -> Dict:

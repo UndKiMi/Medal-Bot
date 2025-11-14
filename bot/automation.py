@@ -4,8 +4,13 @@ import random
 import time
 import traceback
 from datetime import datetime, timedelta
+from typing import Optional
 from bot.config_loader import config
-from bot.utils.helpers import wait_random, human_typing, random_scroll
+from bot.utils.helpers import (
+    wait_random, human_typing, random_scroll,
+    click_next_button, validate_radio_selected, validate_text_input
+)
+from bot.utils.avis_manager import AvisManager
 from bot.scheduler import scheduler
 from selenium.webdriver import ActionChains
 from selenium.webdriver.common.by import By
@@ -17,7 +22,7 @@ import undetected_chromedriver as uc
 from selenium_stealth import stealth
 
 from bot.config import (
-    XPATHS, TIMING, CHROME_OPTIONS, 
+    XPATHS, TIMING, TIMEOUTS, CHROME_OPTIONS, 
     AVIS_MAPPING, SERVICE_TYPE_MAPPING,
     RESTAURANT_NUMBER, SURVEY_URL, BASE_DIR
 )
@@ -32,6 +37,9 @@ session_data = {
     'current_avis_file': None,
     'requires_extra_steps': False
 }
+
+# Instance globale du gestionnaire d'avis (cache)
+avis_manager = AvisManager(AVIS_MAPPING)
 
 def setup_driver() -> Optional[uc.Chrome]:
     """Configure et retourne une instance du navigateur Chrome avec les options nécessaires."""
@@ -108,42 +116,13 @@ def human_typing(element: WebElement, text: str) -> None:
         time.sleep(random.uniform(0.05, 0.15))
 
 def pick_avis(category: str = None) -> str:
-    """Sélectionne un avis aléatoire en fonction de la catégorie."""
+    """Sélectionne un avis aléatoire en fonction de la catégorie (utilise le cache)."""
     try:
         logger.info(f"📋 Catégorie reçue: '{category}'")
-        logger.info(f"📋 session_data complet: {session_data}")
         
-        if not category or category not in AVIS_MAPPING:
-            logger.warning(f"⚠️ Catégorie '{category}' non trouvée dans AVIS_MAPPING, utilisation de 'drive' par défaut")
-            logger.info(f"📋 Catégories disponibles: {list(AVIS_MAPPING.keys())}")
-            avis_file = AVIS_MAPPING.get('drive')
-        else:
-            avis_file = AVIS_MAPPING.get(category)
-        
-        logger.info(f"📁 Fichier d'avis sélectionné: {avis_file}")
-        session_data['current_avis_file'] = avis_file
-        
-        if not os.path.exists(avis_file):
-            logger.error(f"❌ Fichier d'avis introuvable: {avis_file}")
-            logger.error(f"❌ Chemin absolu vérifié: {os.path.abspath(avis_file)}")
-            return "Excellent service, très satisfait de ma visite !"
-        
-        with open(avis_file, 'r', encoding='utf-8') as f:
-            import re
-            avis_list = []
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('AVIS'):
-                    cleaned_line = re.sub(r'^\d+\.\s*', '', line)
-                    if cleaned_line:
-                        avis_list.append(cleaned_line)
-        
-        if not avis_list:
-            logger.error(f"❌ Aucun avis trouvé dans le fichier: {avis_file}")
-            return "Excellent service, très satisfait de ma visite !"
-        
-        selected_avis = random.choice(avis_list)
-        logger.info(f"📝 Avis sélectionné: {selected_avis[:50]}...")
+        # Utiliser le gestionnaire d'avis avec cache
+        selected_avis = avis_manager.load_avis(category)
+        session_data['current_avis_file'] = avis_manager.avis_mapping.get(category or 'drive')
         
         return selected_avis
         
@@ -217,10 +196,10 @@ def step_2_age_selection(driver) -> bool:
             driver.execute_script("arguments[0].click();", selected_radio)
             logger.info("✅ Tranche d'âge sélectionnée (excluant 'moins de 15 ans')")
         
-        # Cliquer sur Suivant
+        # Cliquer sur Suivant (factorisé)
         wait_random(1, 2)
-        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
-        driver.execute_script("arguments[0].click();", next_button)
+        if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
+            return False
         
         wait_random(2, 3)
         return True
@@ -245,47 +224,55 @@ def step_3_ticket_info(driver) -> bool:
         
         date_jour, heure, minute = visit_time
         
-        # 1. Saisir la date
+        # 1. Saisir la date avec validation
         try:
             date_field = driver.find_element(By.XPATH, "//input[@placeholder='JJ/MM/AAAA']")
             date_field.clear()
             wait_random(0.2, 0.5)
             human_typing(date_field, date_jour)
+            if not validate_text_input(driver, date_field, expected_text=date_jour, min_length=8):
+                logger.warning("⚠️ Validation de la date échouée, mais on continue")
             logger.info(f"✅ Date saisie: {date_jour}")
         except:
             logger.warning("⚠️ Champ date non trouvé")
         
         wait_random(0.5, 1)
         
-        # 2. Saisir heure et minute
+        # 2. Saisir heure et minute avec validation
         try:
             heure_fields = driver.find_elements(By.XPATH, "//input[@maxlength='2' and @type='text']")
             if len(heure_fields) >= 2:
                 heure_fields[0].clear()
                 human_typing(heure_fields[0], heure)
+                if not validate_text_input(driver, heure_fields[0], expected_text=heure, min_length=1):
+                    logger.warning("⚠️ Validation de l'heure échouée")
                 wait_random(0.3, 0.6)
                 heure_fields[1].clear()
                 human_typing(heure_fields[1], minute)
+                if not validate_text_input(driver, heure_fields[1], expected_text=minute, min_length=1):
+                    logger.warning("⚠️ Validation des minutes échouée")
                 logger.info(f"✅ Heure saisie: {heure}:{minute}")
         except:
             logger.warning("⚠️ Champs heure/minute non trouvés")
         
         wait_random(0.5, 1)
         
-        # 3. Saisir numéro restaurant (4 chiffres)
+        # 3. Saisir numéro restaurant (4 chiffres) avec validation
         try:
             restaurant_field = driver.find_element(By.XPATH, "//input[@maxlength='4' and @type='text']")
             restaurant_field.clear()
             wait_random(0.2, 0.5)
             human_typing(restaurant_field, RESTAURANT_NUMBER)
+            if not validate_text_input(driver, restaurant_field, expected_text=RESTAURANT_NUMBER, min_length=4):
+                logger.warning("⚠️ Validation du numéro restaurant échouée")
             logger.info(f"✅ Numéro restaurant saisi: {RESTAURANT_NUMBER}")
         except:
             logger.warning("⚠️ Champ numéro restaurant non trouvé")
         
-        # Cliquer sur Suivant
+        # Cliquer sur Suivant (factorisé)
         wait_random(1, 2)
-        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
-        driver.execute_script("arguments[0].click();", next_button)
+        if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
+            return False
         
         wait_random(2, 3)
         return True
@@ -316,6 +303,11 @@ def step_4_order_location(driver) -> bool:
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
             wait_random(0.3, 0.7)
             driver.execute_script("arguments[0].click();", selected_radio)
+            # Validation
+            if not validate_radio_selected(driver, selected_radio):
+                logger.warning("⚠️ Validation du radio échouée, nouvelle tentative...")
+                driver.execute_script("arguments[0].checked = true;", selected_radio)
+                driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", selected_radio)
             
             # Déterminer le type d'étapes supplémentaires selon l'option choisie
             # Index 0 = Borne → étapes 4b (consommation) + 4c (récupération)
@@ -343,10 +335,10 @@ def step_4_order_location(driver) -> bool:
                 session_data['current_category'] = 'drive'
                 logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
         
-        # Cliquer sur Suivant
+        # Cliquer sur Suivant (factorisé)
         wait_random(1, 2)
-        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
-        driver.execute_script("arguments[0].click();", next_button)
+        if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
+            return False
         
         wait_random(2, 3)
         return True
@@ -379,10 +371,10 @@ def step_4b_consumption_type(driver) -> bool:
             session_data['consumption_type'] = 'sur_place' if selected_index == 0 else 'emporter'
             logger.info(f"✅ Type de consommation sélectionné: {session_data['consumption_type']}")
         
-        # Cliquer sur Suivant
+        # Cliquer sur Suivant (factorisé)
         wait_random(1, 2)
-        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
-        driver.execute_script("arguments[0].click();", next_button)
+        if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
+            return False
         
         wait_random(2, 3)
         return True
@@ -416,10 +408,10 @@ def step_4c_pickup_location(driver) -> bool:
             session_data['current_category'] = f"{order_loc}_{consumption}"
             logger.info(f"✅ Lieu de récupération sélectionné - Catégorie: {session_data['current_category']}")
         
-        # Cliquer sur Suivant
+        # Cliquer sur Suivant (factorisé)
         wait_random(1, 2)
-        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
-        driver.execute_script("arguments[0].click();", next_button)
+        if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
+            return False
         
         wait_random(2, 3)
         return True
@@ -458,10 +450,10 @@ def step_4d_click_collect_pickup(driver) -> bool:
             session_data['current_category'] = f"{order_loc}_{pickup_locations[selected_index]}"
             logger.info(f"✅ Lieu de récupération Click & Collect sélectionné - Catégorie: {session_data['current_category']}")
         
-        # Cliquer sur Suivant
+        # Cliquer sur Suivant (factorisé)
         wait_random(1, 2)
-        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
-        driver.execute_script("arguments[0].click();", next_button)
+        if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
+            return False
         
         wait_random(2, 3)
         return True
@@ -796,10 +788,10 @@ def step_7_order_accuracy(driver) -> bool:
             driver.execute_script("arguments[0].click();", radios_exact[0])
             logger.info("✅ 'Oui' sélectionné (commande exacte)")
         
-        # Cliquer sur Suivant
+        # Cliquer sur Suivant (factorisé)
         wait_random(1, 2)
-        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
-        driver.execute_script("arguments[0].click();", next_button)
+        if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
+            return False
         
         wait_random(2, 3)
         return True

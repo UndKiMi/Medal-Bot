@@ -4,8 +4,12 @@
 
 import random
 import time
-from typing import List
+import logging
+from typing import List, Callable, Optional, Any
+from functools import wraps
 from selenium.webdriver.remote.webelement import WebElement
+
+logger = logging.getLogger(__name__)
 
 
 def wait_random(min_seconds: float, max_seconds: float) -> None:
@@ -167,3 +171,195 @@ def simulate_reading_time(min_seconds: float = 1.0, max_seconds: float = 3.0) ->
         reading_time += random.uniform(1.0, 3.0)
     
     time.sleep(reading_time)
+
+
+# ============================================================================
+# OPTIMISATIONS : Retry, Attente optimisée, Factorisation
+# ============================================================================
+
+def retry_on_failure(max_retries: int = 3, delay: float = 2.0, backoff: float = 1.5):
+    """
+    Décorateur pour réessayer une fonction en cas d'échec.
+    
+    Args:
+        max_retries: Nombre maximum de tentatives
+        delay: Délai initial entre les tentatives (secondes)
+        backoff: Multiplicateur pour augmenter le délai à chaque tentative
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            current_delay = delay
+            last_exception = None
+            
+            for attempt in range(1, max_retries + 1):
+                try:
+                    result = func(*args, **kwargs)
+                    if attempt > 1:
+                        logger.info(f"✅ {func.__name__} réussi après {attempt} tentatives")
+                    return result
+                except Exception as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        logger.warning(f"⚠️ Tentative {attempt}/{max_retries} échouée pour {func.__name__}: {e}")
+                        time.sleep(current_delay)
+                        current_delay *= backoff
+                    else:
+                        logger.error(f"❌ {func.__name__} a échoué après {max_retries} tentatives")
+            
+            raise last_exception
+        return wrapper
+    return decorator
+
+
+def wait_with_check(total_seconds: int, check_interval: float = 1.0, stop_condition: Optional[Callable[[], bool]] = None) -> bool:
+    """
+    Attend un nombre de secondes avec vérification périodique d'une condition d'arrêt.
+    Plus efficace que time.sleep() en boucle.
+    
+    Args:
+        total_seconds: Nombre total de secondes à attendre
+        check_interval: Intervalle entre les vérifications (secondes)
+        stop_condition: Fonction qui retourne True pour arrêter l'attente
+    
+    Returns:
+        True si l'attente s'est terminée normalement, False si arrêtée par la condition
+    """
+    if total_seconds <= 0:
+        return True
+    
+    elapsed = 0.0
+    while elapsed < total_seconds:
+        if stop_condition and stop_condition():
+            return False
+        
+        sleep_time = min(check_interval, total_seconds - elapsed)
+        time.sleep(sleep_time)
+        elapsed += sleep_time
+    
+    return True
+
+
+def click_next_button(driver, timeout: int = 10) -> bool:
+    """
+    Factorisation : Clique sur le bouton "Suivant" de manière sécurisée.
+    
+    Returns:
+        True si le clic a réussi, False sinon
+    """
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    
+    try:
+        selectors = [
+            "//button[contains(., 'Suivant')]",
+            "//button[contains(text(), 'Suivant')]",
+            "//button[contains(., 'Next')]",
+            "//button[@type='submit']",
+            "//input[@type='submit' and contains(@value, 'Suivant')]"
+        ]
+        
+        next_button = None
+        for selector in selectors:
+            try:
+                next_button = WebDriverWait(driver, timeout).until(
+                    EC.element_to_be_clickable((By.XPATH, selector))
+                )
+                if next_button:
+                    break
+            except:
+                continue
+        
+        if not next_button:
+            logger.error("❌ Bouton Suivant introuvable")
+            return False
+        
+        # Vérifier si le bouton est désactivé
+        is_disabled = driver.execute_script(
+            "return arguments[0].disabled || arguments[0].hasAttribute('disabled');", 
+            next_button
+        )
+        if is_disabled:
+            logger.warning("⚠️ Le bouton Suivant est désactivé, attente supplémentaire...")
+            wait_random(2, 3)
+            is_disabled = driver.execute_script(
+                "return arguments[0].disabled || arguments[0].hasAttribute('disabled');", 
+                next_button
+            )
+            if is_disabled:
+                logger.error("❌ Le bouton Suivant reste désactivé")
+                return False
+        
+        # Scroll et clic
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
+        wait_random(0.5, 1.0)
+        driver.execute_script("arguments[0].click();", next_button)
+        wait_random(1, 2)
+        
+        logger.debug("✅ Bouton Suivant cliqué")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur lors du clic sur Suivant: {e}")
+        return False
+
+
+def validate_radio_selected(driver, element: WebElement, timeout: int = 2) -> bool:
+    """
+    Valide qu'un bouton radio est bien sélectionné.
+    
+    Returns:
+        True si sélectionné, False sinon
+    """
+    try:
+        # Attendre un peu pour que la sélection se propage
+        time.sleep(0.3)
+        
+        # Vérifier via JavaScript
+        is_checked = driver.execute_script("return arguments[0].checked;", element)
+        
+        if not is_checked:
+            # Réessayer en cliquant directement
+            driver.execute_script("arguments[0].checked = true;", element)
+            driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", element)
+            time.sleep(0.2)
+            is_checked = driver.execute_script("return arguments[0].checked;", element)
+        
+        return is_checked
+    except Exception as e:
+        logger.warning(f"⚠️ Erreur lors de la validation du radio: {e}")
+        return False
+
+
+def validate_text_input(driver, element: WebElement, expected_text: Optional[str] = None, min_length: int = 1) -> bool:
+    """
+    Valide qu'un champ texte contient bien du texte.
+    
+    Args:
+        driver: Instance du driver
+        element: Élément input/textarea
+        expected_text: Texte attendu (optionnel)
+        min_length: Longueur minimale requise
+    
+    Returns:
+        True si valide, False sinon
+    """
+    try:
+        time.sleep(0.2)  # Attendre que la valeur se propage
+        
+        value = driver.execute_script(
+            "return arguments[0].value || arguments[0].textContent || arguments[0].innerHTML;", 
+            element
+        )
+        
+        if not value or len(value.strip()) < min_length:
+            return False
+        
+        if expected_text and value.strip() != expected_text.strip():
+            return False
+        
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ Erreur lors de la validation du texte: {e}")
+        return False

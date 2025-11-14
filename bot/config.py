@@ -26,6 +26,15 @@ TIMING = {
     'min_total_duration': int(os.getenv('TIMING_MIN_TOTAL_DURATION', '60')),
 }
 
+# Timeouts centralisés (en secondes)
+TIMEOUTS = {
+    'element_wait': int(os.getenv('TIMEOUT_ELEMENT_WAIT', '10')),  # Attente pour trouver un élément
+    'page_load': int(os.getenv('TIMEOUT_PAGE_LOAD', '30')),  # Chargement de page
+    'click_wait': int(os.getenv('TIMEOUT_CLICK_WAIT', '5')),  # Attente après un clic
+    'retry_delay': int(os.getenv('TIMEOUT_RETRY_DELAY', '2')),  # Délai entre retries
+    'max_retries': int(os.getenv('MAX_RETRIES', '3')),  # Nombre max de tentatives
+}
+
 # XPath des éléments importants
 XPATHS = {
     'start_button': "//button[contains(., 'Commencer') or contains(., 'Start')]",
