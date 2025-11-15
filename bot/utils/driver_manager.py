@@ -4,6 +4,7 @@
 
 import logging
 import random
+import time
 import traceback
 from typing import Optional
 
@@ -45,7 +46,6 @@ def setup_driver(chrome_options: dict) -> Optional[uc.Chrome]:
         )
         
         # Attendre que le driver soit stable et charger une page blanche pour maintenir la fenêtre ouverte
-        import time
         time.sleep(1)  # Délai pour stabiliser le driver
         
         # Vérifier que la fenêtre est toujours ouverte

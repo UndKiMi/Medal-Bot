@@ -17,3 +17,6 @@ python-dateutil>=2.8.2
 
 # Notifications
 requests>=2.31.0
+
+# Sécurité (optionnel - pour chiffrement)
+cryptography>=41.0.0

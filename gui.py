@@ -218,22 +218,42 @@ class MedalBotGUI:
         'cc_site_guichet_vente': 'C&C Site Web',
     }
     
-    # Palette de couleurs Dark Mode moderne
-    COLORS = {
-        'bg_dark': '#1e1e1e',           # Fond principal très sombre
-        'bg_medium': '#252526',         # Fond moyen
-        'bg_light': '#2d2d30',          # Fond clair
-        'bg_hover': '#3e3e42',          # Fond au survol
-        'border': '#3e3e42',            # Bordures
-        'text': '#cccccc',              # Texte principal
-        'text_dim': '#858585',          # Texte atténué
-        'accent_blue': '#0e639c',       # Bleu accent
-        'accent_blue_hover': '#1177bb', # Bleu accent hover
-        'success': '#4ec9b0',           # Vert succès
-        'error': '#f48771',             # Rouge erreur
-        'warning': '#dcdcaa',           # Jaune warning
-        'info': '#569cd6',              # Bleu info
+    # Palettes de couleurs pour thèmes (#11)
+    THEMES = {
+        'dark': {
+            'bg_dark': '#1e1e1e',
+            'bg_medium': '#252526',
+            'bg_light': '#2d2d30',
+            'bg_hover': '#3e3e42',
+            'border': '#3e3e42',
+            'text': '#cccccc',
+            'text_dim': '#858585',
+            'accent_blue': '#0e639c',
+            'accent_blue_hover': '#1177bb',
+            'success': '#4ec9b0',
+            'error': '#f48771',
+            'warning': '#dcdcaa',
+            'info': '#569cd6',
+        },
+        'light': {
+            'bg_dark': '#ffffff',
+            'bg_medium': '#f5f5f5',
+            'bg_light': '#e8e8e8',
+            'bg_hover': '#d0d0d0',
+            'border': '#cccccc',
+            'text': '#1e1e1e',
+            'text_dim': '#666666',
+            'accent_blue': '#0078d4',
+            'accent_blue_hover': '#005a9e',
+            'success': '#107c10',
+            'error': '#d13438',
+            'warning': '#ffaa44',
+            'info': '#0078d4',
+        }
     }
+    
+    # Palette de couleurs Dark Mode moderne (par défaut)
+    COLORS = THEMES['dark']
     
     def __init__(self, root):
         self.root = root
@@ -241,6 +261,10 @@ class MedalBotGUI:
         self.root.geometry("1200x800")  # Fenêtre plus large pour meilleure organisation
         self.root.resizable(True, True)
         self.root.minsize(1000, 700)  # Taille minimale
+        
+        # Interface responsive (#14) - Gérer le redimensionnement
+        self.root.bind('<Configure>', self._on_window_resize)
+        self.last_window_size = (1200, 800)
         
         # Appliquer le thème dark mode
         self.apply_dark_theme()
@@ -270,6 +294,9 @@ class MedalBotGUI:
         self.theme_mode = 'dark'  # Mode thème (dark/light)
         self.performance_data = []  # Données de performance
         self.streak_days = 0  # Jours consécutifs
+        self.focus_mode = False  # Mode focus (#59)
+        self.hidden_widgets = []  # Widgets masqués en mode focus
+        self.min_window_size = (1000, 700)  # Taille minimale pour responsive (#14)
         
         # Variables pour améliorations 10, 18, 25
         self.hourly_data = {}  # Données horaires pour timeline (#10)
@@ -317,8 +344,15 @@ class MedalBotGUI:
         # Démarrer la mise à jour de l'interface
         self.update_gui()
     
+    def apply_theme(self):
+        """Applique le thème à l'interface (#11)."""
+        # Utiliser le thème actuel
+        self.COLORS = self.THEMES[self.theme_mode]
+        # Appeler la méthode principale
+        self.apply_dark_theme()
+    
     def apply_dark_theme(self):
-        """Applique le thème dark mode à l'interface."""
+        """Applique le thème à l'interface (méthode principale)."""
         # Configurer le fond de la fenêtre principale
         self.root.configure(bg=self.COLORS['bg_dark'])
         
@@ -582,6 +616,14 @@ class MedalBotGUI:
         
         self.energy_btn = ttk.Button(energy_frame, text="💡 ÉCONOMIE", command=self.toggle_energy_saving, width=18)
         self.energy_btn.pack(side=tk.LEFT)
+        
+        # Bouton mode focus (#59)
+        self.focus_btn = ttk.Button(btn_option_frame, text="🎯 FOCUS", command=self.toggle_focus_mode, width=18)
+        self.focus_btn.pack(side=tk.LEFT, padx=3)
+        
+        # Bouton thème (#11)
+        self.theme_btn = ttk.Button(btn_option_frame, text="🌙 THÈME", command=self.toggle_theme, width=18)
+        self.theme_btn.pack(side=tk.LEFT, padx=3)
         
         # Ligne 2: Statut et métriques (barre horizontale)
         status_frame = tk.Frame(header_frame, bg=self.COLORS['bg_medium'], relief='flat', bd=1)
@@ -2723,6 +2765,234 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
             self.stats['category_success'][category] = self.stats['category_success'].get(category, 0) + 1
         else:
             self.stats['category_failed'][category] = self.stats['category_failed'].get(category, 0) + 1
+    
+    # ===== AMÉLIORATION 11: THÈMES PERSONNALISABLES =====
+    
+    def toggle_theme(self):
+        """Bascule entre le thème sombre et clair (#11)."""
+        self.theme_mode = 'light' if self.theme_mode == 'dark' else 'dark'
+        self.COLORS = self.THEMES[self.theme_mode]
+        self.apply_dark_theme()  # Réappliquer le thème
+        self.log(f"🎨 Thème changé: {self.theme_mode.upper()}", 'info')
+        # Mettre à jour le texte du bouton
+        self.theme_btn.config(text="☀️ THÈME" if self.theme_mode == 'dark' else "🌙 THÈME")
+        # Mettre à jour tous les widgets
+        self._update_all_widgets_colors()
+    
+    def _update_all_widgets_colors(self):
+        """Met à jour les couleurs de tous les widgets après changement de thème."""
+        # Cette méthode mettra à jour les widgets qui utilisent directement COLORS
+        # Les widgets ttk seront mis à jour automatiquement par apply_dark_theme
+        try:
+            # Mettre à jour les frames tk (non-ttk)
+            for widget in self.root.winfo_children():
+                self._recursive_update_colors(widget)
+        except Exception as e:
+            logging.warning(f"⚠️ Erreur lors de la mise à jour des couleurs: {e}")
+    
+    def _recursive_update_colors(self, widget):
+        """Met à jour récursivement les couleurs des widgets."""
+        try:
+            if isinstance(widget, tk.Frame) or isinstance(widget, tk.Label):
+                if 'bg' in widget.keys():
+                    current_bg = widget.cget('bg')
+                    if current_bg in self.THEMES['dark'].values() or current_bg in self.THEMES['light'].values():
+                        # Trouver la clé correspondante
+                        for key, value in self.COLORS.items():
+                            if value == current_bg or (hasattr(self, 'THEMES') and 
+                                (current_bg == self.THEMES['dark'].get(key) or 
+                                 current_bg == self.THEMES['light'].get(key))):
+                                widget.config(bg=self.COLORS[key])
+                                break
+        except:
+            pass
+        
+        try:
+            for child in widget.winfo_children():
+                self._recursive_update_colors(child)
+        except:
+            pass
+    
+    # ===== AMÉLIORATION 14: INTERFACE RESPONSIVE =====
+    
+    def _on_window_resize(self, event):
+        """Gère le redimensionnement de la fenêtre pour interface responsive (#14)."""
+        if event.widget != self.root:
+            return
+        
+        try:
+            width = self.root.winfo_width()
+            height = self.root.winfo_height()
+            
+            # Vérifier si la taille a vraiment changé
+            if (width, height) == self.last_window_size:
+                return
+            
+            self.last_window_size = (width, height)
+            
+            # Adapter les widgets selon la taille
+            if width < 1100:
+                # Mode compact
+                if hasattr(self, 'notebook'):
+                    # Réduire la taille des onglets
+                    pass
+            else:
+                # Mode normal
+                pass
+            
+            # Mettre à jour les graphiques si nécessaire
+            if hasattr(self, 'graph_canvas1') and self.graph_canvas1:
+                self.root.after(100, self._update_graphs)
+        except Exception as e:
+            logging.debug(f"Erreur lors du redimensionnement: {e}")
+    
+    # ===== AMÉLIORATION 59: MODE FOCUS =====
+    
+    def toggle_focus_mode(self):
+        """Active/désactive le mode focus minimaliste (#59)."""
+        self.focus_mode = not self.focus_mode
+        
+        if self.focus_mode:
+            # Masquer les éléments non essentiels
+            self._enter_focus_mode()
+            self.focus_btn.config(text="👁️ NORMAL")
+            self.log("🎯 Mode focus activé - Interface minimaliste", 'info')
+        else:
+            # Afficher tous les éléments
+            self._exit_focus_mode()
+            self.focus_btn.config(text="🎯 FOCUS")
+            self.log("👁️ Mode normal activé", 'info')
+    
+    def _enter_focus_mode(self):
+        """Entre en mode focus - masque les éléments non essentiels."""
+        self.hidden_widgets = []
+        
+        # Masquer les onglets non essentiels (garder seulement Console et Récents)
+        if hasattr(self, 'notebook'):
+            tabs_to_hide = ['📈 GRAPHIQUES', '📅 TIMELINE', '✏️ ÉDITEUR D\'AVIS']
+            for tab_id in tabs_to_hide:
+                try:
+                    # Trouver l'index de l'onglet
+                    for i in range(self.notebook.index('end')):
+                        if self.notebook.tab(i, 'text') == tab_id:
+                            # Masquer l'onglet (pas directement possible, on le désactive)
+                            self.notebook.tab(i, state='hidden')
+                            self.hidden_widgets.append(('tab', i, tab_id))
+                            break
+                except:
+                    pass
+        
+        # Masquer certains boutons d'options
+        if hasattr(self, 'reset_btn'):
+            self.reset_btn.pack_forget()
+            self.hidden_widgets.append(('widget', self.reset_btn))
+        
+        # Réduire les statistiques affichées
+        # (garder seulement les essentielles)
+    
+    def _exit_focus_mode(self):
+        """Sort du mode focus - réaffiche tous les éléments."""
+        # Réafficher les onglets
+        if hasattr(self, 'notebook'):
+            for widget_type, *args in self.hidden_widgets:
+                if widget_type == 'tab':
+                    try:
+                        tab_index, tab_text = args
+                        self.notebook.tab(tab_index, state='normal')
+                    except:
+                        pass
+        
+        # Réafficher les widgets
+        for widget_type, *args in self.hidden_widgets:
+            if widget_type == 'widget':
+                try:
+                    widget = args[0]
+                    if hasattr(widget, 'pack'):
+                        widget.pack()
+                    elif hasattr(widget, 'grid'):
+                        widget.grid()
+                except:
+                    pass
+        
+        self.hidden_widgets = []
+    
+    # ===== AMÉLIORATION 57: ANIMATIONS AMÉLIORÉES =====
+    
+    def _animate_widget_fade(self, widget, fade_in=True, duration=200):
+        """Animation de fondu pour un widget (#57)."""
+        if self.energy_saving_mode or not hasattr(widget, 'config'):
+            return
+        
+        steps = 10
+        step_delay = duration // steps
+        
+        if fade_in:
+            # Fade in
+            for i in range(steps + 1):
+                alpha = i / steps
+                self.root.after(i * step_delay, lambda a=alpha: self._set_widget_alpha(widget, a))
+        else:
+            # Fade out
+            for i in range(steps + 1):
+                alpha = 1 - (i / steps)
+                self.root.after(i * step_delay, lambda a=alpha: self._set_widget_alpha(widget, a))
+    
+    def _set_widget_alpha(self, widget, alpha):
+        """Définit l'opacité d'un widget (simulation)."""
+        # Tkinter ne supporte pas directement l'opacité, mais on peut simuler avec les couleurs
+        try:
+            if isinstance(widget, tk.Label) or isinstance(widget, tk.Frame):
+                current_bg = widget.cget('bg')
+                # Ajuster la luminosité pour simuler l'opacité
+                pass
+        except:
+            pass
+    
+    def _animate_slide(self, widget, direction='right', distance=20, duration=300):
+        """Animation de glissement pour un widget (#57)."""
+        if self.energy_saving_mode:
+            return
+        
+        steps = 15
+        step_delay = duration // steps
+        step_distance = distance / steps
+        
+        try:
+            original_x = widget.winfo_x()
+            original_y = widget.winfo_y()
+            
+            if direction == 'right':
+                target_x = original_x + distance
+                target_y = original_y
+            elif direction == 'left':
+                target_x = original_x - distance
+                target_y = original_y
+            elif direction == 'down':
+                target_x = original_x
+                target_y = original_y + distance
+            else:  # up
+                target_x = original_x
+                target_y = original_y - distance
+            
+            current_x = original_x
+            current_y = original_y
+            step = 0
+            
+            def slide_step():
+                nonlocal current_x, current_y, step
+                if step < steps:
+                    if direction in ['right', 'left']:
+                        current_x += step_distance if direction == 'right' else -step_distance
+                        widget.place(x=int(current_x), y=original_y)
+                    else:
+                        current_y += step_distance if direction == 'down' else -step_distance
+                        widget.place(x=original_x, y=int(current_y))
+                    step += 1
+                    self.root.after(step_delay, slide_step)
+            
+            slide_step()
+        except:
+            pass
 
 
 def main():

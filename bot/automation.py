@@ -1,5 +1,4 @@
 import logging
-import os
 import random
 import time
 import traceback
@@ -7,14 +6,12 @@ from datetime import datetime, timedelta
 from typing import Optional
 from bot.config_loader import config
 from bot.utils.helpers import (
-    wait_random, human_typing, random_scroll,
+    wait_random, human_typing,
     click_next_button, validate_radio_selected, validate_text_input
 )
 from bot.utils.avis_manager import AvisManager
 from bot.scheduler import scheduler
-from selenium.webdriver import ActionChains
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait

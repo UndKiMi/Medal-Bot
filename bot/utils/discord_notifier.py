@@ -130,6 +130,105 @@ class DiscordNotifier:
             "timestamp": None
         }
         self.send_message(f"⚠️ Erreur: {error_message[:500]}", embed)
+    
+    # ===== AMÉLIORATION 24: NOTIFICATIONS DISCORD AVANCÉES =====
+    
+    def notify_daily_summary(self, stats: dict):
+        """Envoie un résumé quotidien (#24)."""
+        if not self.enabled:
+            return False
+        
+        try:
+            from datetime import datetime
+            total = stats.get('total', 0)
+            success = stats.get('success', 0)
+            failed = stats.get('failed', 0)
+            success_rate = (success / total * 100) if total > 0 else 0
+            
+            embed = {
+                "title": "📊 Résumé Quotidien",
+                "description": f"Statistiques du {datetime.now().strftime('%d/%m/%Y')}",
+                "color": 0x4ec9b0 if success_rate >= 80 else 0xdcdcaa if success_rate >= 50 else 0xf48771,
+                "fields": [
+                    {"name": "Total", "value": str(total), "inline": True},
+                    {"name": "✅ Succès", "value": str(success), "inline": True},
+                    {"name": "❌ Échecs", "value": str(failed), "inline": True},
+                    {"name": "Taux de réussite", "value": f"{success_rate:.1f}%", "inline": True},
+                ],
+                "timestamp": datetime.now().isoformat(),
+                "footer": {"text": "Medal Bot - Résumé automatique"}
+            }
+            
+            # Ajouter les statistiques par catégorie
+            by_category = stats.get('by_category', {})
+            if by_category:
+                category_text = "\n".join([f"{cat}: {count}" for cat, count in by_category.items() if count > 0])
+                if category_text:
+                    embed["fields"].append({"name": "Par catégorie", "value": category_text[:1024], "inline": False})
+            
+            return self.send_message("📊 **Résumé quotidien**", embed)
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de l'envoi du résumé quotidien: {e}")
+            return False
+    
+    def notify_weekly_summary(self, stats: dict):
+        """Envoie un résumé hebdomadaire (#24)."""
+        if not self.enabled:
+            return False
+        
+        try:
+            from datetime import datetime, timedelta
+            week_start = datetime.now() - timedelta(days=7)
+            
+            total = stats.get('total', 0)
+            success = stats.get('success', 0)
+            failed = stats.get('failed', 0)
+            success_rate = (success / total * 100) if total > 0 else 0
+            
+            embed = {
+                "title": "📈 Résumé Hebdomadaire",
+                "description": f"Statistiques de la semaine du {week_start.strftime('%d/%m/%Y')} au {datetime.now().strftime('%d/%m/%Y')}",
+                "color": 0x569cd6,  # Bleu
+                "fields": [
+                    {"name": "Total", "value": str(total), "inline": True},
+                    {"name": "✅ Succès", "value": str(success), "inline": True},
+                    {"name": "❌ Échecs", "value": str(failed), "inline": True},
+                    {"name": "Taux de réussite", "value": f"{success_rate:.1f}%", "inline": True},
+                ],
+                "timestamp": datetime.now().isoformat(),
+                "footer": {"text": "Medal Bot - Résumé hebdomadaire"}
+            }
+            
+            return self.send_message("📈 **Résumé hebdomadaire**", embed)
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de l'envoi du résumé hebdomadaire: {e}")
+            return False
+    
+    def send_rich_embed(self, title: str, description: str, color: int = 0x4ec9b0, 
+                       fields: list = None, footer: str = None):
+        """Envoie un embed riche avec tous les détails (#24)."""
+        if not self.enabled:
+            return False
+        
+        try:
+            from datetime import datetime
+            embed = {
+                "title": title,
+                "description": description,
+                "color": color,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            if fields:
+                embed["fields"] = fields
+            
+            if footer:
+                embed["footer"] = {"text": footer}
+            
+            return self.send_message(title, embed)
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de l'envoi de l'embed riche: {e}")
+            return False
 
 
 # Instance globale
