@@ -1920,9 +1920,9 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                         else:
                             self.log("⏸️ Attente terminée, vérification des conditions...", 'info')
                     else:
-                        self.log("⏸️ Impossible de planifier maintenant, nouvelle tentative dans 60 secondes...", 'warning')
+                        self.log("⏸️ Impossible de planifier maintenant, nouvelle tentative dans 30 secondes...", 'warning')
                         # Optimisation: attente avec vérification périodique
-                        if not wait_with_check(60, check_interval=1.0, stop_condition=lambda: not self.bot_running):
+                        if not wait_with_check(30, check_interval=1.0, stop_condition=lambda: not self.bot_running):  # Optimisé pour vitesse
                             break  # Bot arrêté pendant l'attente
                 
                 except Exception as e:
@@ -1932,8 +1932,8 @@ Prêt à démarrer ! Cliquez sur "▶️ Lancer le Bot" pour commencer.
                     if not self.bot_running:
                         break
                     
-                    # Attendre avant de réessayer
-                    time.sleep(10)
+                    # Attendre avant de réessayer (optimisé pour vitesse)
+                    time.sleep(5)  # Réduit de 10 à 5 secondes
         
         except Exception as e:
             self.log(f"❌ Erreur critique: {e}", 'error')
