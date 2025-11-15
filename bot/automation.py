@@ -35,85 +35,15 @@ session_data = {
     'start_time': None,
     'current_category': None,
     'current_avis_file': None,
-    'requires_extra_steps': False
+    'requires_extra_steps': False,
+    'captcha_detected': False
 }
 
 # Instance globale du gestionnaire d'avis (cache)
 avis_manager = AvisManager(AVIS_MAPPING)
 
-def setup_driver() -> Optional[uc.Chrome]:
-    """Configure et retourne une instance du navigateur Chrome avec les options nécessaires."""
-    try:
-        options = uc.ChromeOptions()
-        
-        # Configuration de base
-        options.add_argument('--start-maximized')
-        options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_argument('--disable-infobars')
-        options.add_argument('--disable-notifications')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-popup-blocking')
-        
-        # NE PAS configurer l'agent utilisateur via add_argument pour éviter la page intermédiaire
-        # L'agent sera configuré via selenium-stealth à la place
-        
-        # Initialiser le navigateur sans version_main pour éviter la page de test
-        driver = uc.Chrome(
-            options=options,
-            use_subprocess=True,
-            version_main=None  # Évite la page de test du user-agent
-        )
-        
-        # Appliquer les paramètres de furtivité (inclut le user-agent)
-        stealth(
-            driver,
-            languages=CHROME_OPTIONS['languages'],
-            vendor=CHROME_OPTIONS['vendor'],
-            platform=CHROME_OPTIONS['platform'],
-            webgl_vendor=CHROME_OPTIONS['webgl_vendor'],
-            renderer=CHROME_OPTIONS['renderer'],
-            fix_hairline=True,
-            user_agent=CHROME_OPTIONS["user_agent"]  # Configurer le user-agent ici
-        )
-        
-        # Modifier des propriétés du navigateur pour éviter la détection
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        
-        # Définir la taille de la fenêtre
-        width, height = map(int, CHROME_OPTIONS['window_size'].split(','))
-        driver.set_window_size(width, height)
-        
-        # Déplacer la souris de manière aléatoire
-        action = ActionChains(driver)
-        action.move_by_offset(random.randint(0, 100), random.randint(0, 100)).perform()
-        
-        return driver
-        
-    except Exception as e:
-        logger.error(f"❌ Erreur lors de l'initialisation du navigateur: {e}")
-        logger.debug(f"Détails: {traceback.format_exc()}")
-        return None
-
-def cleanup_driver(driver):
-    """Ferme le navigateur de manière propre."""
-    if driver:
-        try:
-            driver.quit()
-            logger.info("✅ Navigateur fermé avec succès")
-        except Exception as e:
-            logger.error(f"❌ Erreur lors de la fermeture du navigateur: {e}")
-
-def wait_random(min_seconds: float, max_seconds: float) -> None:
-    """Attend un nombre aléatoire de secondes entre min_seconds et max_seconds."""
-    delay = random.uniform(min_seconds, max_seconds)
-    time.sleep(delay)
-
-def human_typing(element: WebElement, text: str) -> None:
-    """Simule une frappe humaine dans un champ de texte."""
-    for char in text:
-        element.send_keys(char)
-        time.sleep(random.uniform(0.05, 0.15))
+# setup_driver et cleanup_driver sont définies dans bot.utils.driver_manager
+# wait_random et human_typing sont importées depuis bot.utils.helpers
 
 def pick_avis(category: str = None) -> str:
     """Sélectionne un avis aléatoire en fonction de la catégorie (utilise le cache)."""
@@ -128,6 +58,59 @@ def pick_avis(category: str = None) -> str:
         logger.error(f"❌ Erreur sélection avis ({category}): {e}")
         return "Excellent service, très satisfait de ma visite !"
 
+
+def detect_captcha(driver) -> bool:
+    """
+    Détecte la présence d'un CAPTCHA sur la page (#17).
+    
+    Returns:
+        True si un CAPTCHA est détecté, False sinon
+    """
+    try:
+        # Rechercher des éléments typiques de CAPTCHA
+        captcha_indicators = [
+            "//iframe[contains(@src, 'recaptcha')]",
+            "//iframe[contains(@src, 'captcha')]",
+            "//div[contains(@class, 'recaptcha')]",
+            "//div[contains(@class, 'captcha')]",
+            "//div[contains(@id, 'recaptcha')]",
+            "//div[contains(@id, 'captcha')]",
+            "//img[contains(@alt, 'CAPTCHA')]",
+            "//img[contains(@alt, 'captcha')]",
+            "//*[contains(text(), 'CAPTCHA')]",
+            "//*[contains(text(), 'captcha')]",
+            "//*[contains(text(), 'Vérification')]",
+            "//*[contains(text(), 'vérification')]",
+        ]
+        
+        for selector in captcha_indicators:
+            try:
+                elements = driver.find_elements(By.XPATH, selector)
+                if elements:
+                    logger.error("🚨 CAPTCHA détecté sur la page!")
+                    return True
+            except:
+                continue
+        
+        # Vérifier aussi dans le texte de la page
+        try:
+            page_text = driver.page_source.lower()
+            captcha_keywords = ['captcha', 'recaptcha', 'hcaptcha', 'vérification humaine']
+            if any(keyword in page_text for keyword in captcha_keywords):
+                # Vérifier que ce n'est pas juste dans le code source
+                body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+                if any(keyword in body_text for keyword in captcha_keywords):
+                    logger.error("🚨 CAPTCHA détecté dans le contenu de la page!")
+                    return True
+        except:
+            pass
+        
+        return False
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Erreur lors de la détection CAPTCHA: {e}")
+        return False
+
 # ============================================================================
 # ÉTAPES DU QUESTIONNAIRE (ordre exact selon le code fourni)
 # ============================================================================
@@ -136,7 +119,13 @@ def step_1_start_survey(driver) -> bool:
     """Étape 1: Page d'accueil - Cliquer sur 'Commencer l'enquête'"""
     logger.info("🏁 Étape 1: Page d'accueil - Commencer l'enquête")
     try:
-        wait_random(2, 4)
+        # Détecter CAPTCHA (#17)
+        if detect_captcha(driver):
+            logger.error("🚨 CAPTCHA détecté - Arrêt du bot")
+            session_data['captcha_detected'] = True
+            return False
+        
+        wait_random(1, 2)  # Optimisé pour vitesse
         
         # Chercher le bouton "Commencer l'enquête" ou "Commencer"
         start_button = None
@@ -162,11 +151,11 @@ def step_1_start_survey(driver) -> bool:
             return False
         
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", start_button)
-        wait_random(0.5, 1.5)
+        wait_random(0.3, 0.8)  # Optimisé pour vitesse
         driver.execute_script("arguments[0].click();", start_button)
         
         logger.info("✅ Bouton 'Commencer l'enquête' cliqué")
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         return True
         
     except Exception as e:
@@ -177,7 +166,7 @@ def step_2_age_selection(driver) -> bool:
     """Étape 2: Sélection tranche d'âge (choix aléatoire, excluant 'moins de 15 ans')"""
     logger.info("👤 Étape 2: Sélection tranche d'âge")
     try:
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         
         # Trouver tous les boutons radio pour l'âge
         radios_age = WebDriverWait(driver, 10).until(
@@ -189,16 +178,16 @@ def step_2_age_selection(driver) -> bool:
             eligible_radios = radios_age[1:]  # Exclut le premier élément
             selected_radio = random.choice(eligible_radios)
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
-            wait_random(0.3, 0.7)
+            wait_random(0.2, 0.4)  # Optimisé pour vitesse
             driver.execute_script("arguments[0].click();", selected_radio)
             logger.info("✅ Tranche d'âge sélectionnée (excluant 'moins de 15 ans')")
         
         # Cliquer sur Suivant (factorisé)
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
             return False
         
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         return True
         
     except Exception as e:
@@ -209,7 +198,7 @@ def step_3_ticket_info(driver) -> bool:
     """Étape 3: Informations du ticket (date/heure/minute/numéro resto)"""
     logger.info("🎫 Étape 3: Informations du ticket")
     try:
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         
         # Générer une heure de visite aléatoire réaliste via le scheduler
         visit_time = scheduler.get_random_visit_time()
@@ -224,7 +213,7 @@ def step_3_ticket_info(driver) -> bool:
         try:
             date_field = driver.find_element(By.XPATH, "//input[@placeholder='JJ/MM/AAAA']")
             date_field.clear()
-            wait_random(0.2, 0.5)
+            wait_random(0.1, 0.3)  # Optimisé pour vitesse
             human_typing(date_field, date_jour)
             if not validate_text_input(driver, date_field, expected_text=date_jour, min_length=8):
                 logger.warning("⚠️ Validation de la date échouée, mais on continue")
@@ -232,7 +221,7 @@ def step_3_ticket_info(driver) -> bool:
         except:
             logger.warning("⚠️ Champ date non trouvé")
         
-        wait_random(0.5, 1)
+        wait_random(0.3, 0.6)  # Optimisé pour vitesse
         
         # 2. Saisir heure et minute avec validation
         try:
@@ -242,7 +231,7 @@ def step_3_ticket_info(driver) -> bool:
                 human_typing(heure_fields[0], heure)
                 if not validate_text_input(driver, heure_fields[0], expected_text=heure, min_length=1):
                     logger.warning("⚠️ Validation de l'heure échouée")
-                wait_random(0.3, 0.6)
+                wait_random(0.2, 0.4)  # Optimisé pour vitesse
                 heure_fields[1].clear()
                 human_typing(heure_fields[1], minute)
                 if not validate_text_input(driver, heure_fields[1], expected_text=minute, min_length=1):
@@ -251,13 +240,13 @@ def step_3_ticket_info(driver) -> bool:
         except:
             logger.warning("⚠️ Champs heure/minute non trouvés")
         
-        wait_random(0.5, 1)
+        wait_random(0.3, 0.6)  # Optimisé pour vitesse
         
         # 3. Saisir numéro restaurant (4 chiffres) avec validation
         try:
             restaurant_field = driver.find_element(By.XPATH, "//input[@maxlength='4' and @type='text']")
             restaurant_field.clear()
-            wait_random(0.2, 0.5)
+            wait_random(0.1, 0.3)  # Optimisé pour vitesse
             human_typing(restaurant_field, RESTAURANT_NUMBER)
             if not validate_text_input(driver, restaurant_field, expected_text=RESTAURANT_NUMBER, min_length=4):
                 logger.warning("⚠️ Validation du numéro restaurant échouée")
@@ -266,11 +255,11 @@ def step_3_ticket_info(driver) -> bool:
             logger.warning("⚠️ Champ numéro restaurant non trouvé")
         
         # Cliquer sur Suivant (factorisé)
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
             return False
         
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         return True
         
     except Exception as e:
@@ -281,7 +270,7 @@ def step_4_order_location(driver) -> bool:
     """Étape 4: Lieu de commande (6 premières options seulement)"""
     logger.info("📍 Étape 4: Lieu de commande")
     try:
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         
         # Trouver tous les boutons radio
         lieu_radios = WebDriverWait(driver, 10).until(
@@ -296,7 +285,7 @@ def step_4_order_location(driver) -> bool:
             selected_index = random.randint(0, 5)
             selected_radio = lieu_radios[selected_index]
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
-            wait_random(0.3, 0.7)
+            wait_random(0.2, 0.4)  # Optimisé pour vitesse
             driver.execute_script("arguments[0].click();", selected_radio)
             # Validation
             if not validate_radio_selected(driver, selected_radio):
@@ -331,11 +320,11 @@ def step_4_order_location(driver) -> bool:
                 logger.info(f"✅ Lieu de commande sélectionné (option {selected_index + 1}/6)")
         
         # Cliquer sur Suivant (factorisé)
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
             return False
         
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         return True
         
     except Exception as e:
@@ -346,7 +335,7 @@ def step_4b_consumption_type(driver) -> bool:
     """Étape 4b (conditionnelle): Sur place ou à emporter"""
     logger.info("🍽️ Étape 4b: Type de consommation (sur place / à emporter)")
     try:
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         
         # Trouver les boutons radio pour le type de consommation
         consumption_radios = WebDriverWait(driver, 10).until(
@@ -358,7 +347,7 @@ def step_4b_consumption_type(driver) -> bool:
             selected_index = random.randint(0, 1)
             selected_radio = consumption_radios[selected_index]
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
-            wait_random(0.3, 0.7)
+            wait_random(0.2, 0.4)  # Optimisé pour vitesse
             driver.execute_script("arguments[0].click();", selected_radio)
             
             # Stocker le type de consommation
@@ -366,11 +355,11 @@ def step_4b_consumption_type(driver) -> bool:
             logger.info(f"✅ Type de consommation sélectionné: {session_data['consumption_type']}")
         
         # Cliquer sur Suivant (factorisé)
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
             return False
         
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         return True
         
     except Exception as e:
@@ -381,7 +370,7 @@ def step_4c_pickup_location(driver) -> bool:
     """Étape 4c (conditionnelle Borne/Comptoir): Où avez-vous récupéré votre commande"""
     logger.info("📦 Étape 4c: Lieu de récupération de la commande (Borne/Comptoir)")
     try:
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         
         # Trouver les boutons radio pour le lieu de récupération
         pickup_radios = WebDriverWait(driver, 10).until(
@@ -392,7 +381,7 @@ def step_4c_pickup_location(driver) -> bool:
             # Choisir aléatoirement entre "Au comptoir" (0) ou "En service à table" (1)
             selected_radio = random.choice(pickup_radios[:2])
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
-            wait_random(0.3, 0.7)
+            wait_random(0.2, 0.4)  # Optimisé pour vitesse
             driver.execute_script("arguments[0].click();", selected_radio)
             
             # Définir la catégorie finale pour les avis
@@ -402,11 +391,11 @@ def step_4c_pickup_location(driver) -> bool:
             logger.info(f"✅ Lieu de récupération sélectionné - Catégorie: {session_data['current_category']}")
         
         # Cliquer sur Suivant (factorisé)
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
             return False
         
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         return True
         
     except Exception as e:
@@ -417,7 +406,7 @@ def step_4d_click_collect_pickup(driver) -> bool:
     """Étape 4d (conditionnelle Click & Collect): Où avez-vous récupéré votre commande"""
     logger.info("📦 Étape 4d: Lieu de récupération Click & Collect")
     try:
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         
         # Trouver les boutons radio pour le lieu de récupération Click & Collect
         pickup_radios = WebDriverWait(driver, 10).until(
@@ -433,7 +422,7 @@ def step_4d_click_collect_pickup(driver) -> bool:
             selected_index = random.randint(0, 3)
             selected_radio = pickup_radios[selected_index]
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
-            wait_random(0.3, 0.7)
+            wait_random(0.2, 0.4)  # Optimisé pour vitesse
             driver.execute_script("arguments[0].click();", selected_radio)
             
             # Définir la catégorie finale pour les avis
@@ -443,11 +432,11 @@ def step_4d_click_collect_pickup(driver) -> bool:
             logger.info(f"✅ Lieu de récupération Click & Collect sélectionné - Catégorie: {session_data['current_category']}")
         
         # Cliquer sur Suivant (factorisé)
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
             return False
         
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         return True
         
     except Exception as e:
@@ -538,7 +527,7 @@ def step_5_satisfaction_comment(driver) -> bool:
     """Étape 5: Satisfaction générale (premier smiley vert foncé) + commentaire"""
     logger.info("😊 Étape 5: Satisfaction générale + commentaire")
     try:
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         
         # 1. OBLIGATOIRE: Cliquer sur le smiley vert foncé (meilleure satisfaction)
         smiley_selected = False
@@ -556,21 +545,21 @@ def step_5_satisfaction_comment(driver) -> bool:
                     
                     if not best_smiley:
                         logger.warning(f"⚠️ Aucun smiley trouvé à la tentative {attempt + 1}")
-                        wait_random(0.5, 1)
+                        wait_random(0.3, 0.6)  # Optimisé pour vitesse
                         continue
                     
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", best_smiley)
-                    wait_random(1, 1.5)
+                    wait_random(0.5, 1)  # Optimisé pour vitesse
                     
                     parent_label = driver.execute_script("return arguments[0].closest('label') || arguments[0].parentElement;", best_smiley)
                     if parent_label:
                         driver.execute_script("arguments[0].click();", parent_label)
-                        wait_random(0.5, 0.8)
+                        wait_random(0.3, 0.6)  # Optimisé pour vitesse
                     
                     driver.execute_script("arguments[0].checked = true;", best_smiley)
                     driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", best_smiley)
                     driver.execute_script("arguments[0].dispatchEvent(new Event('click', { bubbles: true }));", best_smiley)
-                    wait_random(0.5, 1)
+                    wait_random(0.3, 0.6)  # Optimisé pour vitesse
                     
                     is_checked = driver.execute_script("return arguments[0].checked;", best_smiley)
                     if is_checked:
@@ -591,7 +580,7 @@ def step_5_satisfaction_comment(driver) -> bool:
             logger.error("❌ ÉCHEC: Impossible de sélectionner le smiley après 3 tentatives")
             return False
         
-        wait_random(1.5, 2)
+        wait_random(0.8, 1.2)  # Optimisé pour vitesse
         
         # 2. OBLIGATOIRE: Saisir le commentaire
         commentaire_saisi = False
@@ -619,7 +608,7 @@ def step_5_satisfaction_comment(driver) -> bool:
                 return False
             
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", textarea)
-            wait_random(0.8, 1.2)
+            wait_random(0.5, 0.8)  # Optimisé pour vitesse
             
             commentaire = pick_avis(session_data.get('current_category'))
             if not commentaire:
@@ -627,13 +616,13 @@ def step_5_satisfaction_comment(driver) -> bool:
                 return False
             
             textarea.click()
-            wait_random(0.5, 0.8)
+            wait_random(0.3, 0.6)  # Optimisé pour vitesse
             textarea.clear()
-            wait_random(0.3, 0.5)
+            wait_random(0.2, 0.3)  # Optimisé pour vitesse
             
             logger.info(f"📝 Début de la saisie du commentaire: {commentaire[:50]}...")
             human_typing(textarea, commentaire)
-            wait_random(1, 1.5)
+            wait_random(0.6, 1)  # Optimisé pour vitesse
             
             valeur_saisie = driver.execute_script("return arguments[0].value || arguments[0].textContent || arguments[0].innerHTML;", textarea)
             logger.info(f"🔍 Vérification: valeur récupérée = '{valeur_saisie[:50] if valeur_saisie else 'VIDE'}...'")
@@ -655,7 +644,7 @@ def step_5_satisfaction_comment(driver) -> bool:
             return False
         
         # 3. Cliquer sur Suivant SEULEMENT si smiley ET commentaire OK
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         
         try:
             next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
@@ -663,14 +652,14 @@ def step_5_satisfaction_comment(driver) -> bool:
             is_disabled = driver.execute_script("return arguments[0].disabled || arguments[0].hasAttribute('disabled');", next_button)
             if is_disabled:
                 logger.warning("⚠️ Le bouton Suivant est désactivé, attente supplémentaire...")
-                wait_random(2, 3)
+                wait_random(1, 1.5)  # Optimisé pour vitesse
                 is_disabled = driver.execute_script("return arguments[0].disabled || arguments[0].hasAttribute('disabled');", next_button)
                 if is_disabled:
                     logger.error("❌ Le bouton Suivant reste désactivé")
                     return False
             
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
-            wait_random(0.8, 1.2)
+            wait_random(0.5, 0.8)  # Optimisé pour vitesse
             driver.execute_script("arguments[0].click();", next_button)
             logger.info("✅ Clic sur Suivant effectué")
             
@@ -678,7 +667,7 @@ def step_5_satisfaction_comment(driver) -> bool:
             logger.error(f"❌ Erreur lors du clic sur Suivant: {btn_err}")
             return False
         
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         return True
         
     except Exception as e:
@@ -689,7 +678,7 @@ def step_6_dimension_ratings(driver) -> bool:
     """Étape 6: Notes sur chaque dimension (premier émoji vert foncé de chaque ligne)"""
     logger.info("⭐ Étape 6: Notes sur chaque dimension")
     try:
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         
         # Trouver tous les boutons radio (il y a 4 lignes avec 6 options chacune: 5 émojis + "Non concerné")
         radios_dim = driver.find_elements(By.XPATH, "//input[@type='radio']")
@@ -710,19 +699,19 @@ def step_6_dimension_ratings(driver) -> bool:
                 if index < len(radios_dim):
                     # Faire défiler jusqu'à l'élément
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", radios_dim[index])
-                    wait_random(0.3, 0.7)
+                    wait_random(0.2, 0.4)  # Optimisé pour vitesse
                     
                     # Cliquer sur le premier émoji (vert foncé)
                     driver.execute_script("arguments[0].click();", radios_dim[index])
                     logger.info(f"✅ Ligne {line_num + 1}: Premier émoji vert foncé sélectionné (index {index})")
-                    wait_random(0.2, 0.5)
+                    wait_random(0.1, 0.3)  # Optimisé pour vitesse
             
             logger.info("✅ Toutes les dimensions notées avec le meilleur score")
         else:
             logger.warning("⚠️ Aucun bouton radio trouvé")
         
         # Attendre que le bouton Suivant soit activé
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         
         # Chercher le bouton Suivant avec plusieurs sélecteurs possibles
         next_button = None
@@ -752,11 +741,11 @@ def step_6_dimension_ratings(driver) -> bool:
         
         # Faire défiler et cliquer
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
-        wait_random(0.5, 1)
+        wait_random(0.3, 0.6)  # Optimisé pour vitesse
         driver.execute_script("arguments[0].click();", next_button)
         logger.info("✅ Bouton Suivant cliqué")
         
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         return True
         
     except Exception as e:
@@ -778,11 +767,11 @@ def step_7_order_accuracy(driver) -> bool:
             logger.info("✅ 'Oui' sélectionné (commande exacte)")
         
         # Cliquer sur Suivant (factorisé)
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
             return False
         
-        wait_random(2, 3)
+        wait_random(1, 1.5)  # Optimisé pour vitesse
         return True
         
     except Exception as e:
@@ -793,151 +782,43 @@ def step_8_problem_encountered(driver) -> bool:
     """Étape 8: Problème rencontré (Non = deuxième bouton)"""
     logger.info("❌ Étape 8: Problème rencontré")
     try:
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         
-        # Cliquer sur le deuxième bouton (Non)
-        radios_prob = driver.find_elements(By.XPATH, "//input[@type='radio']")
+        # Cliquer sur le deuxième bouton (Non) avec WebDriverWait pour robustesse
+        radios_prob = WebDriverWait(driver, TIMEOUTS['element_wait']).until(
+            EC.presence_of_all_elements_located((By.XPATH, "//input[@type='radio']"))
+        )
         if radios_prob and len(radios_prob) >= 2:
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", radios_prob[1])
-            wait_random(0.3, 0.7)
-            driver.execute_script("arguments[0].click();", radios_prob[1])
+            selected_radio = radios_prob[1]
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_radio)
+            wait_random(0.2, 0.4)  # Optimisé pour vitesse
+            driver.execute_script("arguments[0].click();", selected_radio)
+            # Validation que le radio est bien sélectionné
+            if not validate_radio_selected(driver, selected_radio):
+                logger.warning("⚠️ Validation du radio échouée, nouvelle tentative...")
+                driver.execute_script("arguments[0].checked = true;", selected_radio)
+                driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", selected_radio)
             logger.info("✅ 'Non' sélectionné (aucun problème)")
+        else:
+            logger.error("❌ Pas assez de boutons radio trouvés")
+            return False
         
-        # Cliquer sur Suivant
-        wait_random(1, 2)
-        next_button = driver.find_element(By.XPATH, "//button[contains(., 'Suivant')]")
-        driver.execute_script("arguments[0].click();", next_button)
+        # Cliquer sur Suivant (utiliser la fonction factorisée pour plus de robustesse)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
+        if not click_next_button(driver, timeout=TIMEOUTS['element_wait']):
+            logger.error("❌ Impossible de cliquer sur Suivant")
+            return False
         
-        wait_random(3, 5)
+        wait_random(1.5, 2.5)  # Optimisé pour vitesse
         logger.info("🎉 Questionnaire terminé !")
         return True
         
     except Exception as e:
         logger.error(f"❌ Étape 8 échouée: {str(e)}")
-        return False
-
-# ============================================================================
-# FONCTION PRINCIPALE
-# ============================================================================
-
-def run_survey_bot(driver: uc.Chrome) -> bool:
-    """Exécute le bot de questionnaire selon le parcours exact."""
-    try:
-        session_data['start_time'] = datetime.now()
-        session_data['requires_extra_steps'] = False
-        logger.info("🚀 Démarrage du bot de questionnaire")
-        
-        # Liste des étapes de base dans l'ordre
-        base_steps = [
-            (step_1_start_survey, "Page d'accueil - Commencer l'enquête"),
-            (step_2_age_selection, "Sélection tranche d'âge"),
-            (step_3_ticket_info, "Informations du ticket"),
-            (step_4_order_location, "Lieu de commande"),
-        ]
-        
-        # Exécuter les étapes de base
-        step_counter = 1
-        for step_func, step_name in base_steps:
-            try:
-                logger.info(f"📍 Étape {step_counter}: {step_name}")
-                result = step_func(driver)
-                
-                if not result:
-                    logger.error(f"❌ Échec de l'étape {step_counter}: {step_name}")
-                    return False
-                else:
-                    logger.info(f"✅ Étape {step_counter} réussie: {step_name}")
-                    step_counter += 1
-                    
-            except Exception as e:
-                logger.error(f"❌ Erreur à l'étape {step_counter} ({step_name}): {e}")
-                logger.debug(f"Détails: {traceback.format_exc()}")
-                return False
-        
-        # Vérifier si on a besoin des étapes conditionnelles
-        extra_steps_type = session_data.get('requires_extra_steps')
-        
-        if extra_steps_type == 'borne_comptoir':
-            logger.info("🔀 Étapes supplémentaires: Borne/Comptoir")
-            
-            # Étape 4b: Type de consommation
-            try:
-                logger.info(f"📍 Étape {step_counter}: Type de consommation")
-                result = step_4b_consumption_type(driver)
-                if not result:
-                    logger.error(f"❌ Échec de l'étape {step_counter}")
-                    return False
-                logger.info(f"✅ Étape {step_counter} réussie")
-                step_counter += 1
-            except Exception as e:
-                logger.error(f"❌ Erreur à l'étape {step_counter}: {e}")
-                logger.debug(f"Détails: {traceback.format_exc()}")
-                return False
-            
-            # Étape 4c: Lieu de récupération (Borne/Comptoir)
-            try:
-                logger.info(f"📍 Étape {step_counter}: Lieu de récupération")
-                result = step_4c_pickup_location(driver)
-                if not result:
-                    logger.error(f"❌ Échec de l'étape {step_counter}")
-                    return False
-                logger.info(f"✅ Étape {step_counter} réussie")
-                step_counter += 1
-            except Exception as e:
-                logger.error(f"❌ Erreur à l'étape {step_counter}: {e}")
-                logger.debug(f"Détails: {traceback.format_exc()}")
-                return False
-        
-        elif extra_steps_type == 'click_collect':
-            logger.info("🔀 Étapes supplémentaires: Click & Collect")
-            
-            # Étape 4d: Lieu de récupération Click & Collect
-            try:
-                logger.info(f"📍 Étape {step_counter}: Lieu de récupération Click & Collect")
-                result = step_4d_click_collect_pickup(driver)
-                if not result:
-                    logger.error(f"❌ Échec de l'étape {step_counter}")
-                    return False
-                logger.info(f"✅ Étape {step_counter} réussie")
-                step_counter += 1
-            except Exception as e:
-                logger.error(f"❌ Erreur à l'étape {step_counter}: {e}")
-                logger.debug(f"Détails: {traceback.format_exc()}")
-                return False
-        
-        # Continuer avec les étapes finales
-        final_steps = [
-            (step_5_satisfaction_comment, "Satisfaction générale + commentaire"),
-            (step_6_dimension_ratings, "Notes sur chaque dimension"),
-            (step_7_order_accuracy, "Commande exacte"),
-            (step_8_problem_encountered, "Problème rencontré")
-        ]
-        
-        for step_func, step_name in final_steps:
-            try:
-                logger.info(f"📍 Étape {step_counter}: {step_name}")
-                result = step_func(driver)
-                
-                if not result:
-                    logger.error(f"❌ Échec de l'étape {step_counter}: {step_name}")
-                    return False
-                else:
-                    logger.info(f"✅ Étape {step_counter} réussie: {step_name}")
-                    step_counter += 1
-                    
-            except Exception as e:
-                logger.error(f"❌ Erreur à l'étape {step_counter} ({step_name}): {e}")
-                logger.debug(f"Détails: {traceback.format_exc()}")
-                return False
-        
-        # Calculer la durée totale
-        duration = (datetime.now() - session_data['start_time']).total_seconds()
-        logger.info(f"⏱️  Durée totale du questionnaire: {duration:.2f} secondes")
-        logger.info("🎉 Questionnaire complété avec succès!")
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Erreur critique lors de l'exécution du bot: {e}")
         logger.debug(f"Détails: {traceback.format_exc()}")
         return False
+
+# ============================================================================
+# NOTE: La fonction run_survey_bot est définie dans bot/survey_runner.py
+# Cette fonction est importée depuis survey_runner.py dans gui.py
+# ============================================================================

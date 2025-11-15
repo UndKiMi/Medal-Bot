@@ -19,14 +19,14 @@ def wait_random(min_seconds: float, max_seconds: float) -> None:
     delay = random.gauss(mean, std)
     delay = max(min_seconds, min(max_seconds, delay))
     
-    # 10% du temps, ajouter une micro-pause (humain hésite)
-    if random.random() < 0.1:
-        delay += random.uniform(0.3, 1.0)
+    # 5% du temps, ajouter une micro-pause (humain hésite) - réduit pour vitesse
+    if random.random() < 0.05:
+        delay += random.uniform(0.2, 0.5)  # Optimisé pour vitesse
     
     time.sleep(delay)
 
 
-def human_typing(element: WebElement, text: str, min_delay: float = 0.08, max_delay: float = 0.15, error_rate: float = 0.02) -> None:
+def human_typing(element: WebElement, text: str, min_delay: float = 0.05, max_delay: float = 0.10, error_rate: float = 0.02) -> None:
     """Simule une frappe humaine avec erreurs et corrections occasionnelles."""
     from selenium.webdriver.common.keys import Keys
     
@@ -50,26 +50,26 @@ def human_typing(element: WebElement, text: str, min_delay: float = 0.08, max_de
         # Taper le bon caractère
         element.send_keys(char)
         
-        # Vitesse variable selon le caractère
+        # Vitesse variable selon le caractère (optimisé pour vitesse)
         if char == ' ':
-            delay = random.uniform(0.15, 0.25)  # Plus lent pour espace
+            delay = random.uniform(0.08, 0.15)  # Plus lent pour espace
         elif char in '.,!?':
-            delay = random.uniform(0.2, 0.4)    # Pause après ponctuation
+            delay = random.uniform(0.1, 0.2)    # Pause après ponctuation
         elif char.isupper():
-            delay = random.uniform(0.12, 0.20)  # Majuscule = Shift
+            delay = random.uniform(0.08, 0.12)  # Majuscule = Shift
         else:
             delay = random.uniform(min_delay, max_delay)
         
         time.sleep(delay)
         
-        # Pause aléatoire (humain réfléchit)
-        if random.random() < 0.05:
-            time.sleep(random.uniform(0.5, 1.5))
+        # Pause aléatoire (humain réfléchit) - réduite
+        if random.random() < 0.03:  # Réduit de 5% à 3%
+            time.sleep(random.uniform(0.3, 0.8))  # Réduit de 0.5-1.5 à 0.3-0.8
         
         i += 1
     
-    # Pause après avoir fini de taper
-    time.sleep(random.uniform(0.3, 0.8))
+        # Pause après avoir fini de taper (optimisé pour vitesse)
+        time.sleep(random.uniform(0.2, 0.5))
 
 
 def scroll_to_element(driver, element: WebElement, block: str = 'center') -> None:
@@ -291,11 +291,11 @@ def click_next_button(driver, timeout: int = 10) -> bool:
                 logger.error("❌ Le bouton Suivant reste désactivé")
                 return False
         
-        # Scroll et clic
+        # Scroll et clic (optimisé pour vitesse)
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
-        wait_random(0.5, 1.0)
+        wait_random(0.3, 0.6)  # Optimisé pour vitesse
         driver.execute_script("arguments[0].click();", next_button)
-        wait_random(1, 2)
+        wait_random(0.5, 1)  # Optimisé pour vitesse
         
         logger.debug("✅ Bouton Suivant cliqué")
         return True

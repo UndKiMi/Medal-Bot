@@ -35,6 +35,7 @@ def run_survey_bot(driver: uc.Chrome) -> bool:
     try:
         session_data['start_time'] = datetime.now()
         session_data['requires_extra_steps'] = False
+        session_data['captcha_detected'] = False  # Réinitialiser le flag CAPTCHA
         logger.info("🚀 Démarrage du bot de questionnaire")
         
         # Étapes de base (1-4)

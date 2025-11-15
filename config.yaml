@@ -16,13 +16,13 @@ chrome:
   webgl_vendor: "Intel Inc."
   renderer: "Intel Iris OpenGL Engine"
 
-# Timing (en secondes)
+# Timing (en secondes) - Optimisé pour vitesse
 timing:
-  page_load: [2, 4]  # Min, Max
-  between_actions: [0.3, 0.7]
-  between_steps: [1, 2]
-  between_questionnaires: [45, 90]
-  retry_delay: [15, 30]
+  page_load: [1, 2]  # Min, Max (réduit de 2-4 à 1-2)
+  between_actions: [0.2, 0.4]  # Réduit de 0.3-0.7 à 0.2-0.4
+  between_steps: [0.5, 1]  # Réduit de 1-2 à 0.5-1
+  between_questionnaires: [30, 60]  # Réduit de 45-90 à 30-60
+  retry_delay: [10, 20]  # Réduit de 15-30 à 10-20
 
 # Chemins des fichiers d'avis
 avis_files:

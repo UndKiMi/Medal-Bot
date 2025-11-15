@@ -44,51 +44,132 @@ def setup_driver(chrome_options: dict) -> Optional[uc.Chrome]:
             driver_executable_path=None
         )
         
-        # Application des paramètres de furtivité
-        stealth(
-            driver,
-            languages=chrome_options['languages'],
-            vendor=chrome_options['vendor'],
-            platform=chrome_options['platform'],
-            webgl_vendor=chrome_options['webgl_vendor'],
-            renderer=chrome_options['renderer'],
-            fix_hairline=True,
-            user_agent=chrome_options["user_agent"]
-        )
+        # Attendre que le driver soit stable et charger une page blanche pour maintenir la fenêtre ouverte
+        import time
+        time.sleep(1)  # Délai pour stabiliser le driver
         
-        # Injection des scripts anti-détection
-        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-            'source': '''
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                
-                window.chrome = {
-                    runtime: {}
-                };
-                
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5]
-                });
-                
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['fr-FR', 'fr', 'en-US', 'en']
-                });
-            '''
-        })
+        # Vérifier que la fenêtre est toujours ouverte
+        try:
+            _ = driver.current_url
+        except Exception:
+            logger.error("❌ La fenêtre Chrome s'est fermée immédiatement après l'ouverture")
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+            return None
         
-        # Configuration de la fenêtre
-        width, height = map(int, chrome_options['window_size'].split(','))
-        width += random.randint(-20, 20)
-        height += random.randint(-20, 20)
-        driver.set_window_size(width, height)
+        # Charger une page blanche pour maintenir la fenêtre ouverte pendant l'injection des scripts
+        try:
+            driver.get("about:blank")
+            time.sleep(0.5)  # Attendre que la page se charge
+        except Exception as e:
+            logger.warning(f"⚠️ Impossible de charger about:blank: {e}")
         
-        # Simulation de mouvement de souris
-        action = ActionChains(driver)
-        action.move_by_offset(random.randint(0, 100), random.randint(0, 100)).perform()
+        # Application des paramètres de furtivité avec gestion d'erreur
+        try:
+            stealth(
+                driver,
+                languages=chrome_options['languages'],
+                vendor=chrome_options['vendor'],
+                platform=chrome_options['platform'],
+                webgl_vendor=chrome_options['webgl_vendor'],
+                renderer=chrome_options['renderer'],
+                fix_hairline=True,
+                user_agent=chrome_options["user_agent"]
+            )
+        except Exception as stealth_error:
+            # Si stealth échoue, on continue quand même (les scripts manuels seront injectés)
+            logger.warning(f"⚠️ Erreur lors de l'application de stealth (continuation): {stealth_error}")
+            # Vérifier que la fenêtre est toujours ouverte
+            try:
+                _ = driver.current_url
+            except Exception:
+                logger.error("❌ La fenêtre Chrome s'est fermée pendant l'injection stealth")
+                if driver:
+                    try:
+                        driver.quit()
+                    except:
+                        pass
+                return None
         
-        logger.info("✅ Navigateur initialisé")
-        return driver
+        # Injection des scripts anti-détection avec gestion d'erreur
+        try:
+            driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                'source': '''
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                    
+                    window.chrome = {
+                        runtime: {}
+                    };
+                    
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5]
+                    });
+                    
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['fr-FR', 'fr', 'en-US', 'en']
+                    });
+                '''
+            })
+        except Exception as cdp_error:
+            # Si l'injection CDP échoue, on continue quand même
+            logger.warning(f"⚠️ Erreur lors de l'injection CDP (continuation): {cdp_error}")
+            # Vérifier que la fenêtre est toujours ouverte
+            try:
+                _ = driver.current_url
+            except Exception:
+                logger.error("❌ La fenêtre Chrome s'est fermée pendant l'injection CDP")
+                if driver:
+                    try:
+                        driver.quit()
+                    except:
+                        pass
+                return None
+        
+        # Configuration de la fenêtre avec vérification
+        try:
+            width, height = map(int, chrome_options['window_size'].split(','))
+            width += random.randint(-20, 20)
+            height += random.randint(-20, 20)
+            driver.set_window_size(width, height)
+        except Exception as size_error:
+            logger.warning(f"⚠️ Erreur lors du redimensionnement (continuation): {size_error}")
+            # Vérifier que la fenêtre est toujours ouverte
+            try:
+                _ = driver.current_url
+            except Exception:
+                logger.error("❌ La fenêtre Chrome s'est fermée pendant le redimensionnement")
+                if driver:
+                    try:
+                        driver.quit()
+                    except:
+                        pass
+                return None
+        
+        # Simulation de mouvement de souris avec vérification
+        try:
+            action = ActionChains(driver)
+            action.move_by_offset(random.randint(0, 100), random.randint(0, 100)).perform()
+        except Exception as mouse_error:
+            logger.warning(f"⚠️ Erreur lors du mouvement de souris (continuation): {mouse_error}")
+        
+        # Vérification finale que le driver est fonctionnel
+        try:
+            _ = driver.current_url
+            logger.info("✅ Navigateur initialisé")
+            return driver
+        except Exception:
+            logger.error("❌ Le driver n'est pas fonctionnel après l'initialisation")
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+            return None
         
     except Exception as e:
         logger.error(f"❌ Erreur lors de l'initialisation du navigateur: {e}")
